@@ -19,6 +19,10 @@ export interface Config {
   mode: Mode;
   /** Tool results longer than this are cut to head + tail. */
   maxToolChars: number;
+  /** SearXNG server for the web_search tool; empty turns it off. */
+  searchUrl: string;
+  /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
+  bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
   compactAt: number;
   /** Extra fields merged into every request (sampling params etc). */
@@ -37,18 +41,34 @@ const DEFAULTS: Config = {
   showThinking: false,
   mode: "edit",
   maxToolChars: 24000,
+  bashTimeout: 120,
+  searchUrl: "http://127.0.0.1:8888",
   compactAt: 0.85,
   extraBody: {},
 };
 
+/**
+ * Reads the settings file. It is written with every setting and its default
+ * the first time, and settings added in later versions are filled in, so the
+ * file always shows everything there is to change.
+ */
 export function loadConfig(): Config {
   let file: Partial<Config> = {};
+  let exists = true;
   try {
     file = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
   } catch (e: any) {
     if (e.code !== "ENOENT") throw new Error(`${CONFIG_PATH}: ${e.message}`);
+    exists = false;
   }
-  return { ...DEFAULTS, ...file };
+  const cfg = { ...DEFAULTS, ...file };
+  if (!exists || Object.keys(DEFAULTS).some((k) => !(k in file))) {
+    try {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...DEFAULTS, ...file }, null, 2) + "\n");
+    } catch {}
+  }
+  return cfg;
 }
 
 /** Writes back only the settings the user can change from inside jcoder. */

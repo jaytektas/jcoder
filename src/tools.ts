@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Content, ToolSchema } from "./client.js";
 import { HOME, type Mode } from "./config.js";
 import { isImagePath, kb, loadImage } from "./images.js";
+import { webFetch, webSearch } from "./web.js";
 import { c } from "./ui.js";
 
 export interface ToolResult {
@@ -27,6 +28,10 @@ export interface ToolContext {
   mode: Mode;
   signal: AbortSignal;
   maxChars: number;
+  /** Default bash timeout, seconds. */
+  bashTimeout: number;
+  /** SearXNG server for web_search; empty = off. */
+  searchUrl: string;
   approve(tool: string, summary: string): Promise<Approval>;
   /** path -> mtime when the model last read or wrote it. */
   seen: Map<string, number>;
@@ -259,7 +264,7 @@ const bash: Tool = {
       "start it in the background with its output redirected to a file (cmd > /tmp/x.log 2>&1 &); it keeps running after the call returns.",
     {
       command: str("The command"),
-      timeout: int("Seconds before it is killed (default 120, max 600)"),
+      timeout: int("Seconds before it is killed (max 600)"),
     },
     ["command"],
   ),
@@ -270,7 +275,7 @@ const bash: Tool = {
     if (!cmd.trim()) return fail("command is empty.");
     const ok = await ctx.approve("bash", cmd);
     if (!ok.ok) return fail(`User declined.${ok.reason ? ` They said: ${ok.reason}` : ""}`);
-    const timeout = Math.min(600, Math.max(1, Number(a.timeout) || 120)) * 1000;
+    const timeout = Math.min(600, Math.max(1, Number(a.timeout) || ctx.bashTimeout)) * 1000;
     return new Promise((done) => {
       const child = spawn("bash", ["-c", cmd], {
         cwd: ctx.cwd,
@@ -391,8 +396,35 @@ const glob: Tool = {
   },
 };
 
+const search: Tool = {
+  schema: def(
+    "web_search",
+    "Search the web. Returns titles, URLs and snippets; web_fetch a result to read it.",
+    { query: str("Search terms"), count: int("Number of results (default 8, max 20)") },
+    ["query"],
+  ),
+  writes: false,
+  summary: (a) => String(a.query),
+  run: (a, ctx) => webSearch(ctx.searchUrl, String(a.query ?? ""), Number(a.count) || 8, ctx.signal),
+};
+
+const fetchPage: Tool = {
+  schema: def(
+    "web_fetch",
+    "Fetch a web page and return its main text (or a JSON/text file as it is). Long pages are cut; the full text is saved to a file you can read.",
+    { url: str("http(s) URL") },
+    ["url"],
+  ),
+  writes: false,
+  summary: (a) => String(a.url),
+  async run(a, ctx) {
+    const r = await webFetch(String(a.url ?? ""), ctx.signal);
+    return typeof r.content === "string" ? { ...r, content: cap(r.content, ctx.maxChars) } : r;
+  },
+};
+
 export const TOOLS: Record<string, Tool> = Object.fromEntries(
-  [readFile, writeFile, editFile, bash, grep, glob].map((t) => [t.schema.function.name, t]),
+  [readFile, writeFile, editFile, bash, grep, glob, search, fetchPage].map((t) => [t.schema.function.name, t]),
 );
 
 /**

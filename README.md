@@ -4,7 +4,7 @@ A coding agent for a local OpenAI-compatible LLM server (llama.cpp first).
 
 Built to make the most of a local model:
 
-- **Small prompt.** System prompt + tools is ~1.2k tokens.
+- **Small prompt.** System prompt + tools is ~1.5k tokens.
 - **Append-only history.** Nothing already sent is ever rewritten, so the
   server reuses its cache and a long session doesn't reprocess from scratch.
 - **Old thinking isn't sent back.** The model's reasoning is shown (or not)
@@ -24,8 +24,20 @@ Built to make the most of a local model:
     jcoder -c           continue the last conversation in this directory
     jcoder -p "..."     one request, then exit
 
-Esc stops the model. Ctrl+T shows or hides its thinking. `/help` lists the
-commands.
+The input sits at the bottom; everything above is normal terminal
+scrollback. `/` lists commands as you type, `@` completes file paths (the
+file's text, an image, or a directory listing goes to the model with the
+message). Messages typed while the model works are queued.
+
+Keys: Esc stops the model · Shift+Tab cycles the mode · Ctrl+T shows or hides
+its thinking · Ctrl+V pastes an image · `\` + Enter (or Alt+Enter, Ctrl+J)
+for a new line · Up/Down for history · Ctrl+C twice or Ctrl+D quits.
+
+## Tools
+
+`read_file` `write_file` `edit_file` `bash` `grep` `glob` `web_search`
+`web_fetch`. Web search goes through a SearXNG server (`searchUrl`);
+`web_fetch` returns a page's main text.
 
 ## Images
 
@@ -53,7 +65,9 @@ Changes take effect in a new conversation.
 
 ## Settings
 
-`~/.jcoder/config.json` (or `$JCODER_CONFIG`):
+`~/.jcoder/config.json` (or `$JCODER_CONFIG`). It's written with every
+setting and its default on first run, and new settings are added to it, so
+it always shows what there is:
 
 | key | default | |
 |---|---|---|
@@ -65,6 +79,8 @@ Changes take effect in a new conversation.
 | `showThinking` | false | `/thoughts`, Ctrl+T |
 | `mode` | `edit` | `ro` read-only · `edit` edits freely, asks before commands · `auto` asks nothing |
 | `maxToolChars` | 24000 | tool results longer than this are cut |
+| `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
+| `searchUrl` | `http://127.0.0.1:8888` | SearXNG server for `web_search`; empty turns it off |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
 | `extraBody` | `{}` | merged into every request, e.g. sampling params |
 

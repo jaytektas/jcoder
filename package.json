@@ -10,6 +10,7 @@
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
     "typescript": "^7.0.2"
   },
   "type": "module",
@@ -19,5 +20,10 @@
   "engines": {
     "node": ">=22"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.3.0",
+    "wrap-ansi": "^10.0.2"
+  }
 }
