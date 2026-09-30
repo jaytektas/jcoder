@@ -5,7 +5,7 @@
 # GitHub release with the built package (jcoder-X.Y.Z.tgz) attached. Every
 # installed jcoder picks it up within a day, or at once with /update.
 #
-#   scripts/release.sh patch|minor|major|X.Y.Z
+#   scripts/release.sh patch|minor|major|X.Y.Z   (the current version releases it as is)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -17,8 +17,15 @@ command -v gh >/dev/null || { echo "needs the GitHub CLI (gh)" >&2; exit 1; }
 
 npm ci --no-audit --no-fund
 npm run build
-version=$(npm version "$bump" -m "jcoder %s")   # commits package.json and tags vX.Y.Z
-version=${version#v}
+current=$(node -p "require('./package.json').version")
+if [ "$bump" = "$current" ]; then
+  # Releasing the version already in package.json (the first release).
+  git tag -a "v$current" -m "jcoder $current"
+  version=$current
+else
+  version=$(npm version "$bump" -m "jcoder %s")   # commits package.json and tags vX.Y.Z
+  version=${version#v}
+fi
 tgz=$(npm pack --silent)                         # runs the build again via prepack
 git push --follow-tags
 # The same package as jcoder.tgz too, so releases/latest/download/jcoder.tgz
