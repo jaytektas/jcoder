@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.3.0
 
 - **Advisors.** `ask_model` can use several remote models, with presets for
   Gemini, Groq, Cerebras, OpenRouter, NVIDIA and Claude: add a key and go.

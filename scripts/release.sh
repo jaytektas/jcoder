@@ -28,6 +28,17 @@ else
   version=${version#v}
 fi
 tgz=$(npm pack --silent)                         # runs the build again via prepack
+
+# Never publish a key: refuse if the package or the commits being pushed
+# hold anything shaped like one (Google, Anthropic, OpenAI, Groq, GitHub,
+# OpenRouter, NVIDIA, Hugging Face, AWS).
+KEYS='AIza[0-9A-Za-z_-]{30,}|AQ\.[0-9A-Za-z_-]{30,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-(proj-)?[0-9A-Za-z_-]{30,}|gsk_[0-9A-Za-z]{30,}|gh[pousr]_[0-9A-Za-z]{30,}|sk-or-[0-9A-Za-z_-]{30,}|nvapi-[0-9A-Za-z_-]{30,}|hf_[0-9A-Za-z]{30,}|AKIA[0-9A-Z]{16}'
+if tar xzOf "$tgz" | grep -Eq "$KEYS" || git log -p "@{u}..HEAD" 2>/dev/null | grep -Eq "$KEYS"; then
+  rm -f "$tgz"
+  git tag -d "v$version" >/dev/null
+  echo "refusing to release: something that looks like an API key is in the package or the new commits" >&2
+  exit 1
+fi
 git push --follow-tags
 # The same package as jcoder.tgz too, so releases/latest/download/jcoder.tgz
 # is a stable install URL.
