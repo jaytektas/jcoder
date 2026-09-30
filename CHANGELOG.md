@@ -12,6 +12,7 @@
   fresh context and get a report back. Several run at once, up to the
   server's slots.
 - **Drag and drop.** Drop files on the terminal to attach them.
+- `ask_model` retries when the remote model is busy or rate-limited.
 - Updates install from any kind of install. Web search is offered once a
   search server is set. Paths inside the project show relative to it.
 
