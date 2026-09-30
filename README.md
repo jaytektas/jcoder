@@ -155,6 +155,24 @@ the main one.
 
 `maxAgents` caps how many run at once, or `0` turns agents off.
 
+**Agents on other machines.** Agents can run on other servers, say a fast
+small model on another box, which suits the scouting jobs agents mostly do
+while your big model does the thinking:
+
+```json
+"agentServers": [
+  { "name": "box4b", "baseUrl": "http://192.168.1.30:8080" }
+],
+"agentsOnMain": true
+```
+
+Each agent goes to the first agent server with a free slot, then to the main
+server; `"agentsOnMain": false` keeps them off the main server entirely.
+Model, slots and context size are read from the server (llama.cpp reports
+them); set `"model"`, `"slots"` or `"apiKey"` to override. `sampling`
+applies per model, so a small model can have its own. The agent's status
+line shows where it runs.
+
 Agents run in parallel only if the server does. With llama.cpp, give it
 slots that share one KV cache, so any slot can use the whole context:
 
@@ -249,6 +267,8 @@ setting and its default on first run, so everything you can change is in it.
 | `showThinking` | false | show the model's thinking |
 | `mode` | `edit` | `ro` · `edit` · `auto` |
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
+| `agentServers` | `[]` | other servers for sub-agents, see [Agents on other machines](#tools) |
+| `agentsOnMain` | true | run sub-agents on the main server too |
 | `maxAgents` | -1 | sub-agents at once: `0` turns agents off, a number caps them (never above the server's slots), `-1` follows the server's slots |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |

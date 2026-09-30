@@ -20,6 +20,8 @@ export interface AgentStatus {
   /** The tool it ran last. */
   last?: string;
   started: number;
+  /** The agent server it runs on; empty for the main one. */
+  server?: string;
 }
 
 /** What the agent reports while it works. The Ink app and plain output both implement it. */

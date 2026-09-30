@@ -77,21 +77,26 @@ export async function listModels(cfg: Config): Promise<string[]> {
   return (j.data ?? []).map((m: any) => m.id);
 }
 
-/** Set once /props answers: the server is llama.cpp. */
-let llamaCpp = false;
-/** How many requests the server runs at once (llama.cpp slots); a guess for other servers. */
-export let serverSlots = 4;
+/** What a server told us about itself, by baseUrl. */
+export interface ServerInfo {
+  /** llama.cpp (it answers /props). */
+  llamaCpp: boolean;
+  /** Requests it runs at once: llama.cpp's slots, else unknown. */
+  slots?: number;
+}
+const servers = new Map<string, ServerInfo>();
+export const serverInfo = (baseUrl: string): ServerInfo => servers.get(baseUrl) ?? { llamaCpp: false };
 
-/** llama.cpp reports its context size at /props; other servers don't. */
+/** llama.cpp reports its context size and slots at /props; other servers don't. */
 export async function serverContext(cfg: Config): Promise<number | undefined> {
   try {
-    const r = await fetch(`${cfg.baseUrl}/props`, { headers: headers(cfg) });
+    const r = await fetch(`${cfg.baseUrl}/props`, { headers: headers(cfg), signal: AbortSignal.timeout(5000) });
     if (!r.ok) return undefined;
     const j: any = await r.json();
     const n = j.default_generation_settings?.n_ctx;
     if (typeof n !== "number" || n <= 0) return undefined;
-    llamaCpp = true;
-    if (typeof j.total_slots === "number" && j.total_slots > 0) serverSlots = j.total_slots;
+    const slots = typeof j.total_slots === "number" && j.total_slots > 0 ? j.total_slots : undefined;
+    servers.set(cfg.baseUrl, { llamaCpp: true, slots });
     return n;
   } catch {
     return undefined;
@@ -178,7 +183,7 @@ export async function chat(
     body.reasoning_budget_tokens = budget;
     body.reasoning_budget_message = "\n\nThat's my thinking budget used up; I'll answer now with what I have.\n";
   }
-  if (!llamaCpp && (effort === "low" || effort === "medium" || effort === "high")) body.reasoning_effort = effort;
+  if (!serverInfo(cfg.baseUrl).llamaCpp && (effort === "low" || effort === "medium" || effort === "high")) body.reasoning_effort = effort;
   // The model's sampling settings, thinking or not, from the settings.
   const sampling = samplingFor(cfg)?.profile[effort === "off" ? "noThinking" : "thinking"];
   if (sampling) Object.assign(body, sampling);

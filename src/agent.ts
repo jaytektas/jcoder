@@ -8,7 +8,7 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
-import { chat, serverSlots, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
+import { chat, listModels, serverContext, serverInfo, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
 import { saveSettings, type Config } from "./config.js";
 import type { Image } from "./images.js";
 import { DROP_DAYS, dropped, PRESETS, resolveAdvisors, type Advisor } from "./advisors.js";
@@ -29,20 +29,43 @@ function readingProgress(view: View, label: string) {
   };
 }
 
-/** Limits how many sub-agents run at once, to the server's slots. */
-class Gate {
+/** A server sub-agents can run on. */
+interface Endpoint {
+  name: string;
+  cfg: Config;
+  contextWindow: number;
+  slots: number;
+  running: number;
+}
+
+/**
+ * Hands out endpoints to sub-agents: the first with a free slot, agent
+ * servers before the main one, never more than `max` agents in all. When
+ * everything is busy, callers wait for a release.
+ */
+class Pool {
   private waiting: (() => void)[] = [];
-  private running = 0;
-  constructor(private size: () => number) {}
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    while (this.running >= Math.max(1, this.size())) await new Promise<void>((r) => this.waiting.push(r));
-    this.running++;
-    try {
-      return await fn();
-    } finally {
-      this.running--;
-      this.waiting.shift()?.();
+  private total = 0;
+  constructor(
+    readonly endpoints: Endpoint[],
+    private max: number,
+  ) {}
+  async acquire(signal: AbortSignal): Promise<Endpoint | null> {
+    for (;;) {
+      if (signal.aborted) return null;
+      const free = this.total < this.max ? this.endpoints.find((e) => e.running < e.slots) : undefined;
+      if (free) {
+        free.running++;
+        this.total++;
+        return free;
+      }
+      await new Promise<void>((r) => this.waiting.push(r));
     }
+  }
+  release(e: Endpoint) {
+    e.running--;
+    this.total--;
+    this.waiting.shift()?.();
   }
 }
 
@@ -58,8 +81,9 @@ class SubView implements View {
     private parent: View,
     private id: string,
     description: string,
+    server = "",
   ) {
-    this.st = { description, label: "Starting", detail: "", tools: 0, started: Date.now() };
+    this.st = { description, label: "Starting", detail: "", tools: 0, started: Date.now(), server };
     parent.agentUpdate(id, { ...this.st });
   }
   private update() {
@@ -131,8 +155,8 @@ export class Agent {
   readonly tools: ToolSchema[];
   readonly advisors: Advisor[];
   private agents = 0;
-  // As many at once as the server has slots, or fewer if maxAgents says so.
-  private gate = new Gate(() => (this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, serverSlots) : serverSlots));
+  /** Where sub-agents run; worked out on first use. */
+  private pool?: Promise<Pool>;
 
   constructor(
     private cfg: Config,
@@ -216,24 +240,56 @@ export class Agent {
     );
   }
 
+  /**
+   * The servers sub-agents can use: the agentServers that answer (their
+   * model, slots and context read from them when not set), then the main
+   * server unless agentsOnMain is off.
+   */
+  private buildPool(): Promise<Pool> {
+    return (this.pool ??= (async () => {
+      const endpoints: Endpoint[] = [];
+      for (const s of this.cfg.agentServers.filter((s) => !s.disabled && s.baseUrl)) {
+        const name = s.name ?? s.baseUrl.replace(/^https?:\/\//, "");
+        const cfg: Config = { ...this.cfg, baseUrl: s.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, ""), apiKey: s.apiKey ?? "", model: s.model ?? "" };
+        try {
+          if (!cfg.model) cfg.model = (await listModels(cfg))[0] ?? "";
+          if (!cfg.model) throw new Error("it lists no models");
+          const ctx = (await serverContext(cfg)) ?? this.cfg.contextWindow;
+          endpoints.push({ name, cfg, contextWindow: ctx, slots: s.slots ?? serverInfo(cfg.baseUrl).slots ?? 1, running: 0 });
+        } catch (e: any) {
+          this.view.notice(`Agent server ${name} isn't answering (${e.cause?.code ?? e.message}); not using it this session.`, "warn");
+        }
+      }
+      if (this.cfg.agentsOnMain || !endpoints.length) {
+        if (!this.cfg.agentsOnMain) this.view.notice("No agent server answered, so agents run on the main server.", "warn");
+        endpoints.push({ name: "main", cfg: this.cfg, contextWindow: this.contextWindow, slots: serverInfo(this.cfg.baseUrl).slots ?? 4, running: 0 });
+      }
+      const slots = endpoints.reduce((n, e) => n + e.slots, 0);
+      return new Pool(endpoints, this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, slots) : slots);
+    })());
+  }
+
   /** A sub-agent with a fresh context does `task` and reports back. */
-  private runAgent(description: string, task: string, signal: AbortSignal): Promise<ToolResult> {
+  private async runAgent(description: string, task: string, signal: AbortSignal): Promise<ToolResult> {
     const id = `${this.session.id}-agent${++this.agents}`;
-    return this.gate.run(async () => {
-      if (signal.aborted) return { content: "Not run: the user interrupted.", error: true };
+    const pool = await this.buildPool();
+    const ep = await pool.acquire(signal);
+    if (!ep) return { content: "Not run: the user interrupted.", error: true };
+    {
       const cwd = this.session.cwd;
-      const session: Session = { id, cwd, model: this.cfg.model, messages: [{ role: "system", content: agentPrompt(cwd) }], updated: "" };
-      const view = new SubView(this.view, id, description);
-      const agent = new Agent(this.cfg, session, this.contextWindow, view, { description, parent: this.session });
+      const session: Session = { id, cwd, model: ep.cfg.model, messages: [{ role: "system", content: agentPrompt(cwd) }], updated: "" };
+      const where = ep.name === "main" ? "" : ep.name;
+      const view = new SubView(this.view, id, description, where);
+      const agent = new Agent(ep.cfg, session, ep.contextWindow, view, { description, parent: this.session });
       agent.allowed = this.allowed; // "don't ask again" covers its agents too
       const stop = () => agent.stop();
       signal.addEventListener("abort", stop);
       const started = Date.now();
-      this.log({ type: "agent", description, task });
+      this.log({ type: "agent", description, task, server: ep.name, model: ep.cfg.model });
       try {
         const report = await agent.turn(task);
         const secs = Math.round((Date.now() - started) / 1000);
-        const summary = `"${description}" · ${secs}s · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
+        const summary = `"${description}"${where ? ` on ${where}` : ""} · ${secs}s · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
         if (signal.aborted) return { content: "The user interrupted the agent.", display: `stopped after ${summary}`, error: true };
         if (!report.trim()) return { content: "The agent finished without a report.", display: `no report · ${summary}`, error: true };
         return { content: `Report from the agent ("${description}"):\n\n${report}`, display: `${summary}\n${preview(report, 4)}` };
@@ -241,8 +297,9 @@ export class Agent {
         signal.removeEventListener("abort", stop);
         view.close();
         this.view.agentUpdate(id, null);
+        pool.release(ep);
       }
-    });
+    }
   }
 
   /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */

@@ -188,6 +188,7 @@ function AgentLine({ st }: { st: AgentStatus }) {
         {"  "}
         {SPIN[frame % SPIN.length]} {st.description}
       </Text>
+      {st.server && <Text color="cyan"> on {st.server}</Text>}
       <Text color="gray">
         {"  "}
         {secs}s · {st.tools} tool{st.tools === 1 ? "" : "s"} · {doing}

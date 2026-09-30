@@ -47,6 +47,10 @@ export interface Config {
   dropAdvisors: DropPolicy;
   /** Look for new releases on GitHub (at most once a day) and offer to install them. */
   checkUpdates: boolean;
+  /** Other servers to run sub-agents on (say a fast small model on another machine), tried before the main one. */
+  agentServers: AgentServer[];
+  /** Run sub-agents on the main server too, when the agent servers are busy or there are none. */
+  agentsOnMain: boolean;
   /** Sub-agents at once: 0 turns the agent tool off, a number caps them (never above the server's slots), -1 follows the server's slots. */
   maxAgents: number;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
@@ -62,6 +66,18 @@ export interface Config {
    * with no match gets the server's own settings.
    */
   sampling: Record<string, SamplingProfile>;
+}
+
+/** A server for sub-agents. Model, slots and context come from the server when left out. */
+export interface AgentServer {
+  name?: string;
+  /** Server root, without /v1. */
+  baseUrl: string;
+  apiKey?: string;
+  model?: string;
+  /** Agents it runs at once; llama.cpp reports its slots. */
+  slots?: number;
+  disabled?: boolean;
 }
 
 export interface SamplingProfile {
@@ -96,6 +112,8 @@ const DEFAULTS: Config = {
   maxToolChars: 24000,
   bashTimeout: 120,
   maxAgents: -1,
+  agentServers: [],
+  agentsOnMain: true,
   searchUrl: "",
   checkUpdates: true,
   advisors: [],

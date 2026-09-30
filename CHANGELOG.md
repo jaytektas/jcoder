@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Agents on other machines.** `agentServers` lists other servers (say a
+  fast small model on another box) for sub-agents; each agent goes to the
+  first with a free slot, then the main server unless `agentsOnMain` is off.
 - `maxAgents`: cap how many sub-agents run at once, or `0` to turn agents off.
 
 ## 0.3.0
