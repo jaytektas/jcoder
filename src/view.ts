@@ -1,3 +1,13 @@
+// jcoder — a coding agent for a local LLM server
+// Copyright (C) 2026 Jason Roughley
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
+// file for details.
+
 import type { Approval, Todo } from "./tools.js";
 import { c, indent, preview, write } from "./ui.js";
 
@@ -51,7 +61,7 @@ export class PlainView implements View {
 
   result(display: string, error: boolean) {
     const text = error ? c.red(preview(display, 8)) : c.gray(display);
-    write(indent(text, "  ⎿ ").replace(/\n  ⎿ /g, "\n    ") + "\n");
+    write(indent(text, "  └ ").replace(/\n  └ /g, "\n    ") + "\n");
   }
 
   notice(text: string, tone: "info" | "warn" | "error" = "info") {

@@ -1,3 +1,13 @@
+// jcoder — a coding agent for a local LLM server
+// Copyright (C) 2026 Jason Roughley
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
+// file for details.
+
 /**
  * Just enough markdown for terminal replies: headings, lists, quotes, code
  * blocks, **bold**, *italic*, `code`. Returns ANSI-styled text.
@@ -5,7 +15,7 @@
 const E = "\x1b[";
 const bold = (s: string) => `${E}1m${s}${E}22m`;
 const italic = (s: string) => `${E}3m${s}${E}23m`;
-const code = (s: string) => `${E}38;5;147m${s}${E}39m`; // soft lavender, like inline code here
+const code = (s: string) => `${E}38;5;147m${s}${E}39m`; // soft lavender
 const dim = (s: string) => `${E}2m${s}${E}22m`;
 const block = (s: string) => `${E}38;5;180m${s}${E}39m`;
 

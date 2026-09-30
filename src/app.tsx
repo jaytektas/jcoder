@@ -1,3 +1,13 @@
+// jcoder — a coding agent for a local LLM server
+// Copyright (C) 2026 Jason Roughley
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
+// file for details.
+
 import fs from "node:fs";
 import path from "node:path";
 import { Box, Static, Text, render, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
@@ -95,15 +105,15 @@ const ansi = { bold: (t: string) => `${E}1m${t}${E}22m`, cyan: (t: string) => `$
 const blocks = {
   /** A piece of a reply; `text` is already rendered markdown. */
   reply: (text: string, first: boolean): Block => ({ prefix: first ? "● " : "  ", text, marginTop: first ? 1 : 0 }),
-  thought: (text: string, first: boolean): Block => ({ prefix: first ? "✻ " : "  ", prefixColor: "gray", text, color: "gray", italic: true, marginTop: first ? 1 : 0 }),
+  thought: (text: string, first: boolean): Block => ({ prefix: first ? "∴ " : "  ", prefixColor: "gray", text, color: "gray", italic: true, marginTop: first ? 1 : 0 }),
   user: (text: string): Block => ({ prefix: "❯ ", prefixColor: "gray", text, bg: "#303030", marginTop: 1 }),
   tool: (name: string, summary: string): Block => ({ prefix: "● ", prefixColor: "green", text: `${ansi.bold(name)} ${summary.split("\n")[0]}`, marginTop: 1 }),
-  result: (display: string, error: boolean): Block => ({ prefix: "  ⎿  ", prefixColor: "gray", text: display, color: error ? "red" : "gray" }),
+  result: (display: string, error: boolean): Block => ({ prefix: "  └  ", prefixColor: "gray", text: display, color: error ? "red" : "gray" }),
   notice: (text: string, tone: "info" | "warn" | "error"): Block => ({ prefix: "  ", text, color: tone === "error" ? "red" : tone === "warn" ? "yellow" : "gray" }),
 };
 
 const tilde = (p: string) => (process.env.HOME && p.startsWith(process.env.HOME) ? "~" + p.slice(process.env.HOME.length) : p);
-const SPIN = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 interface Item {
   id: number;
@@ -334,9 +344,9 @@ function App(props: Props) {
     },
     turnDone({ seconds, status, stopped }) {
       setBusy(null);
-      if (stopped) push({ prefix: "  ⎿  ", prefixColor: "red", text: "Interrupted · tell it what to do instead", color: "red" });
+      if (stopped) push({ prefix: "  └  ", prefixColor: "red", text: "Interrupted · tell it what to do instead", color: "red" });
       const secs = seconds < 60 ? `${Math.round(seconds)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-      push({ text: `✻ Done in ${secs}${status ? ` · ${status}` : ""}`, color: "gray", marginTop: 1 });
+      push({ text: `✓ Done in ${secs}${status ? ` · ${status}` : ""}`, color: "gray", marginTop: 1 });
     },
   };
   const viewRef = useRef(view);
@@ -376,7 +386,7 @@ function App(props: Props) {
   useEffect(() => {
     const n = notes(cwd);
     const lines = [
-      `${ansi.bold(ansi.magenta("✻ jcoder"))}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
+      `${ansi.bold(ansi.magenta("◆ jcoder"))}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
       ansi.gray(`  ${tilde(cwd)}`),
       ...(n.length ? [ansi.gray(`  notes: ${n.map((x) => tilde(x.file)).join(", ")}`)] : []),
       ansi.gray("  / for commands · @ for files · ctrl+v pastes an image · esc stops the model"),
