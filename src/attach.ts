@@ -26,6 +26,39 @@ export interface Prepared {
 const MENTION = /(^|\s)@((?:[^\s\\]|\\.)+)/g;
 
 /**
+ * Files dropped on the terminal arrive as pasted paths: 'quoted' or "quoted",
+ * with backslash-escaped spaces, or as file:// URLs, several separated by
+ * spaces. If everything pasted is paths to things that exist, returns them
+ * as @mentions (relative inside the project) to put in the input instead.
+ */
+export function droppedFiles(text: string, cwd: string): string | null {
+  const t = text.trim();
+  if (!t || t.includes("\n") && !/^(file:\/\/\S+\s*)+$/.test(t)) return null;
+  const tokens: string[] = [];
+  const re = /'([^']*)'|"([^"]*)"|((?:[^\s\\'"]|\\.)+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t))) tokens.push(m[1] ?? m[2] ?? m[3].replace(/\\(.)/g, "$1"));
+  if (!tokens.length) return null;
+  const out: string[] = [];
+  for (let tok of tokens) {
+    if (tok.startsWith("file://")) {
+      try {
+        tok = decodeURIComponent(new URL(tok).pathname);
+      } catch {
+        return null;
+      }
+    }
+    if (!tok.startsWith("/") && !tok.startsWith("~/")) return null; // a drop is always a full path
+    const abs = path.resolve(tok.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
+    if (!fs.existsSync(abs)) return null;
+    const rel = path.relative(cwd, abs);
+    const shown = rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : abs;
+    out.push("@" + shown.replace(/ /g, "\\ ") + (fs.statSync(abs).isDirectory() && !shown.endsWith("/") ? "/" : ""));
+  }
+  return out.join(" ") + " ";
+}
+
+/**
  * Turns what the user typed into what the model gets: pasted images whose
  * [image #n] marker is still there, image files named in the text, and @paths
  * — a text file's numbered lines (as read_file would give them, so the model

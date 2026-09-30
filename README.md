@@ -92,6 +92,7 @@ terminal scrollback, so your mouse wheel and Shift+PgUp work as usual.
 |---|---|
 | `/` | commands, filtered as you type |
 | `@path` | attach a file: its text, an image, or a folder listing |
+| drag and drop | drop files on the terminal to attach them, like `@path` |
 | Ctrl+V | paste an image from the clipboard (screenshots welcome; the model can see) |
 | Esc | stop the model |
 | Shift+Tab | cycle the mode: edit → auto → read-only |

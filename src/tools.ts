@@ -179,7 +179,7 @@ const readFile: Tool = {
     if (end < lines.length) out += `\n\n(lines ${offset}-${end} of ${lines.length}; use offset to read more)`;
     return {
       content: cap(out, ctx.maxChars),
-      display: `${slice.length} lines${end < lines.length ? ` of ${lines.length}` : ""}`,
+      display: `${slice.length} line${slice.length === 1 ? "" : "s"}${end < lines.length ? ` of ${lines.length}` : ""}`,
     };
   },
 };
@@ -205,7 +205,7 @@ const writeFile: Tool = {
     fs.writeFileSync(abs, content);
     ctx.seen.set(abs, mtime(abs));
     const n = content.split("\n").length;
-    return { content: `${existed ? "Overwrote" : "Created"} ${rel(ctx, abs)} (${n} lines).`, display: `${n} lines` };
+    return { content: `${existed ? "Overwrote" : "Created"} ${rel(ctx, abs)} (${n} lines).`, display: `${n} line${n === 1 ? "" : "s"}` };
   },
 };
 

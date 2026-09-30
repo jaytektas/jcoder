@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Box, Text, useInput, usePaste } from "ink";
 import { useMemo, useState, type ReactNode } from "react";
+import { droppedFiles } from "./attach.js";
 import { matchCommands, matchFiles, tokenAt } from "./complete.js";
 import { HOME } from "./config.js";
 
@@ -142,6 +143,12 @@ export function Editor(p: EditorProps) {
 
   usePaste(
     (text) => {
+      // A file dropped on the terminal pastes its path: attach it instead.
+      const dropped = droppedFiles(text, p.cwd);
+      if (dropped) {
+        const before = value.slice(0, cursor);
+        return insert((before && !/\s$/.test(before) ? " " : "") + dropped);
+      }
       text = text.replace(/\r\n?/g, "\n");
       const lines = text.split("\n").length;
       if (lines > BIG_PASTE_LINES || text.length > BIG_PASTE_CHARS) {
