@@ -21,6 +21,9 @@ version=$(npm version "$bump" -m "jcoder %s")   # commits package.json and tags 
 version=${version#v}
 tgz=$(npm pack --silent)                         # runs the build again via prepack
 git push --follow-tags
-gh release create "v$version" "$tgz" --title "jcoder $version" --generate-notes
-rm -f "$tgz"
+# The same package as jcoder.tgz too, so releases/latest/download/jcoder.tgz
+# is a stable install URL.
+cp "$tgz" jcoder.tgz
+gh release create "v$version" "$tgz" jcoder.tgz --title "jcoder $version" --generate-notes
+rm -f "$tgz" jcoder.tgz
 echo "released jcoder $version"

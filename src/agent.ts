@@ -229,7 +229,9 @@ export class Agent {
       this.view.result("no such tool", true);
       return { content: `There is no tool called ${name}. Tools: ${Object.keys(TOOLS).join(", ")}.`, error: true };
     }
-    this.view.tool(name, tool.summary(args));
+    // Paths inside the project read shorter relative to it.
+    const cwd = this.session.cwd;
+    this.view.tool(name, tool.summary(args).replaceAll(cwd + "/", "").replaceAll(cwd, "."));
     this.view.busy(`Running ${name}`);
 
     let result: ToolResult;

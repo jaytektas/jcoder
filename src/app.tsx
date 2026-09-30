@@ -292,11 +292,18 @@ function App(props: Props) {
       st.blanks++;
       return;
     }
-    const [rendered, inCode] = renderLines(done, st.inCode);
-    st.inCode = inCode;
-    push(blocks.reply("\n".repeat(st.blanks) + rendered, !st.replyStarted));
-    st.blanks = 0;
-    st.replyStarted = true;
+    // A chunk can bring several lines at once: its trailing blank lines are
+    // held back like any other, in case the reply ends there.
+    const trailing = /\n*$/.exec(done)![0].length;
+    done = done.slice(0, done.length - trailing);
+    if (done) {
+      const [rendered, inCode] = renderLines(done, st.inCode);
+      st.inCode = inCode;
+      push(blocks.reply("\n".repeat(st.blanks) + rendered, !st.replyStarted));
+      st.blanks = 0;
+      st.replyStarted = true;
+    }
+    st.blanks += trailing;
   };
 
   const view: View = {
