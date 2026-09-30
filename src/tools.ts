@@ -451,12 +451,21 @@ const askModel: Tool = {
     const m = ctx.askModel;
     if (!m.apiKey) return fail("ask_model has no API key set.");
     try {
-      const r = await fetch(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${m.apiKey}` },
-        body: JSON.stringify({ model: m.model, messages: [{ role: "user", content: String(a.question ?? "") }] }),
-        signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(180_000)]),
-      });
+      const send = () =>
+        fetch(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${m.apiKey}` },
+          body: JSON.stringify({ model: m.model, messages: [{ role: "user", content: String(a.question ?? "") }] }),
+          signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(180_000)]),
+        });
+      // Busy (503) or rate-limited (429) is usually a moment's thing, on free keys especially.
+      let r = await send();
+      for (const wait of [3000, 8000]) {
+        if (r.status !== 503 && r.status !== 429) break;
+        await new Promise((res) => setTimeout(res, wait));
+        if (ctx.signal.aborted) return fail("Interrupted.");
+        r = await send();
+      }
       const text = await r.text();
       if (!r.ok) return fail(`${m.name} returned HTTP ${r.status}: ${text.slice(0, 400)}`);
       const answer = JSON.parse(text).choices?.[0]?.message?.content ?? "";
