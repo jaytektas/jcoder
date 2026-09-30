@@ -79,6 +79,8 @@ export async function listModels(cfg: Config): Promise<string[]> {
 
 /** Set once /props answers: the server is llama.cpp. */
 let llamaCpp = false;
+/** How many requests the server runs at once (llama.cpp slots); a guess for other servers. */
+export let serverSlots = 4;
 
 /** llama.cpp reports its context size at /props; other servers don't. */
 export async function serverContext(cfg: Config): Promise<number | undefined> {
@@ -89,6 +91,7 @@ export async function serverContext(cfg: Config): Promise<number | undefined> {
     const n = j.default_generation_settings?.n_ctx;
     if (typeof n !== "number" || n <= 0) return undefined;
     llamaCpp = true;
+    if (typeof j.total_slots === "number" && j.total_slots > 0) serverSlots = j.total_slots;
     return n;
   } catch {
     return undefined;

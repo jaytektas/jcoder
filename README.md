@@ -141,6 +141,23 @@ From a script: `jcoder -p "fix the failing test"` runs one request and exits.
 | `todo` | the model's checklist for a bigger job, shown above the input |
 | `ask_user` | the model asks you a question, with choices, mid-task |
 | `ask_model` | a second opinion from a stronger remote model (only once you set a key) |
+| `agent` | hand a self-contained job to a sub-agent with a fresh context |
+
+**Agents.** For a big search or an independent piece of work, the model can
+start a sub-agent. It has the same tools (it can't start agents itself, ask
+you questions or touch the to-do list), works in a fresh context, and hands
+back a report; only the report enters your conversation, so it stays small.
+Several agents in one reply run at the same time, up to the server's slots.
+Each shows a live line above the input, and its permission questions come
+to you with its name. Its prompt is `prompts/agent.md`, overridable like
+the main one.
+
+Agents run in parallel only if the server does. With llama.cpp, give it
+slots that share one KV cache, so any slot can use the whole context:
+
+```sh
+llama-server -m your-model.gguf -ngl 99 -fa on -c 163840 -np 5 --kv-unified --port 8080
+```
 
 **Asking Gemini.** Put a free key from https://aistudio.google.com/apikey
 in the settings (or `GEMINI_API_KEY`) and the model can ask Gemini when it's

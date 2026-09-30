@@ -11,6 +11,17 @@
 import type { Approval, Todo } from "./tools.js";
 import { c, indent, preview, write } from "./ui.js";
 
+/** A sub-agent's progress, for a status line. */
+export interface AgentStatus {
+  description: string;
+  label: string;
+  detail: string;
+  tools: number;
+  /** The tool it ran last. */
+  last?: string;
+  started: number;
+}
+
 /** What the agent reports while it works. The Ink app and plain output both implement it. */
 export interface View {
   /** The status line while a turn runs: "Thinking", "Running bash", ... `progress` 0–1 draws a bar. */
@@ -28,6 +39,8 @@ export interface View {
   /** ask_user: the answer, or null if none. */
   ask(question: string, options: string[]): Promise<string | null>;
   todos(items: Todo[]): void;
+  /** A sub-agent started, moved on, or (null) finished. */
+  agentUpdate(id: string, status: AgentStatus | null): void;
   turnDone(info: { seconds: number; status: string; stopped: boolean }): void;
 }
 
@@ -77,6 +90,8 @@ export class PlainView implements View {
   }
 
   todos() {}
+
+  agentUpdate() {}
 
   turnDone(info: { seconds: number; status: string; stopped: boolean }) {
     if (info.stopped) write(c.yellow("[stopped]\n"));

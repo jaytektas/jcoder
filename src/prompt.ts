@@ -42,20 +42,23 @@ function gitBranch(cwd: string): string | null {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
+const PROMPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "prompts");
+
 /** The built-in template, shipped next to dist/. */
-export const DEFAULT_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "prompts", "system.md");
+export const DEFAULT_TEMPLATE = path.join(PROMPTS, "system.md");
 /** A copy here replaces the built-in one. */
 export const USER_TEMPLATE = path.join(HOME, "system.md");
 
-export function templatePath(): string {
-  return fs.existsSync(USER_TEMPLATE) ? USER_TEMPLATE : DEFAULT_TEMPLATE;
+export function templatePath(name = "system"): string {
+  const mine = path.join(HOME, `${name}.md`);
+  return fs.existsSync(mine) ? mine : path.join(PROMPTS, `${name}.md`);
 }
 
 /**
- * The system prompt: the template with {{cwd}}, {{git}}, {{os}}, {{date}} and
+ * A prompt from its template, with {{cwd}}, {{git}}, {{os}}, {{date}} and
  * {{notes}} filled in. Unknown {{names}} are left as they are.
  */
-export function systemPrompt(cwd: string): string {
+function render(name: string, cwd: string): string {
   const branch = gitBranch(cwd);
   const vars: Record<string, string> = {
     cwd,
@@ -66,6 +69,12 @@ export function systemPrompt(cwd: string): string {
       .map((n) => `\nNotes from ${n.file}:\n${n.text}`)
       .join("\n"),
   };
-  const template = fs.readFileSync(templatePath(), "utf8");
-  return template.replace(/\{\{(\w+)\}\}/g, (m, name) => vars[name] ?? m).trim();
+  const template = fs.readFileSync(templatePath(name), "utf8");
+  return template.replace(/\{\{(\w+)\}\}/g, (m, key) => vars[key] ?? m).trim();
 }
+
+/** The main agent's system prompt (prompts/system.md, or ~/.jcoder/system.md). */
+export const systemPrompt = (cwd: string) => render("system", cwd);
+
+/** A sub-agent's (prompts/agent.md, or ~/.jcoder/agent.md). */
+export const agentPrompt = (cwd: string) => render("agent", cwd);

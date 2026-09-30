@@ -8,14 +8,15 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
-import { chat, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
+import { chat, serverSlots, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
 import type { Config } from "./config.js";
 import type { Image } from "./images.js";
-import { log, saveSession, storeContent, type Session } from "./session.js";
+import { agentPrompt } from "./prompt.js";
+import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
 import { schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
 import { preview } from "./ui.js";
-import type { View } from "./view.js";
+import type { AgentStatus, View } from "./view.js";
 
 export const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
@@ -25,6 +26,80 @@ function readingProgress(view: View, label: string) {
     if (total - cached < 2000 || done >= total) return;
     view.busy(label, `${k(done)}/${k(total)} tokens`, done / total);
   };
+}
+
+/** Limits how many sub-agents run at once, to the server's slots. */
+class Gate {
+  private waiting: (() => void)[] = [];
+  private running = 0;
+  constructor(private size: () => number) {}
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    while (this.running >= Math.max(1, this.size())) await new Promise<void>((r) => this.waiting.push(r));
+    this.running++;
+    try {
+      return await fn();
+    } finally {
+      this.running--;
+      this.waiting.shift()?.();
+    }
+  }
+}
+
+/**
+ * What a sub-agent shows: not its output, which is for the main model, but
+ * one status line in the parent's view. Its permission questions go to the
+ * user labelled with its name; it can't ask anything else.
+ */
+class SubView implements View {
+  private st: AgentStatus;
+  private timer?: NodeJS.Timeout;
+  constructor(
+    private parent: View,
+    private id: string,
+    description: string,
+  ) {
+    this.st = { description, label: "Starting", detail: "", tools: 0, started: Date.now() };
+    parent.agentUpdate(id, { ...this.st });
+  }
+  private update() {
+    // Tokens stream fast; the status line needn't.
+    this.timer ??= setTimeout(() => {
+      this.timer = undefined;
+      this.parent.agentUpdate(this.id, { ...this.st });
+    }, 150);
+  }
+  busy(label: string, detail = "") {
+    this.st.label = label;
+    this.st.detail = detail;
+    this.update();
+  }
+  thinking() {}
+  text() {}
+  endMessage() {}
+  tool(name: string, summary: string) {
+    this.st.tools++;
+    this.st.last = `${name} ${summary.split("\n")[0]}`;
+    this.update();
+  }
+  result() {}
+  notice(text: string, tone?: "info" | "warn" | "error") {
+    if (tone === "error") this.parent.notice(`agent "${this.st.description}": ${text}`, tone);
+  }
+  approve(tool: string, summary: string) {
+    return this.parent.approve(tool, `(agent "${this.st.description}") ${summary}`);
+  }
+  async ask() {
+    return null;
+  }
+  todos() {}
+  agentUpdate() {}
+  turnDone() {}
+  close() {
+    clearTimeout(this.timer);
+  }
+  get tools() {
+    return this.st.tools;
+  }
 }
 
 export class Agent {
@@ -43,14 +118,24 @@ export class Agent {
   todos: Todo[] = [];
   /** Fixed for the session: the tool list is part of the prompt the server caches. */
   readonly tools: ToolSchema[];
+  private agents = 0;
+  private gate = new Gate(() => serverSlots);
 
   constructor(
     private cfg: Config,
     public session: Session,
     public contextWindow: number,
     private view: View,
+    /** Set for a sub-agent: its name, and the conversation whose log gets its record. */
+    private sub?: { description: string; parent: Session },
   ) {
-    this.tools = schemas(cfg);
+    this.tools = schemas(cfg, !!sub);
+  }
+
+  /** A sub-agent's record goes into its parent's log, marked with its name. */
+  private log(event: Record<string, unknown>) {
+    if (this.sub) writeLog(this.sub.parent, { ...event, agent: this.sub.description });
+    else writeLog(this.session, event);
   }
 
   get messages(): Message[] {
@@ -82,16 +167,47 @@ export class Agent {
       },
       approve: (t, summary) => this.approve(t, summary),
       seen: this.seen,
+      runAgent: this.sub ? undefined : (description, task) => this.runAgent(description, task, signal),
     };
   }
 
-  /** Runs one user request to the end: model, tools, model, ... */
-  async turn(text: string, images: Image[] = []): Promise<void> {
+  /** A sub-agent with a fresh context does `task` and reports back. */
+  private runAgent(description: string, task: string, signal: AbortSignal): Promise<ToolResult> {
+    const id = `${this.session.id}-agent${++this.agents}`;
+    return this.gate.run(async () => {
+      if (signal.aborted) return { content: "Not run: the user interrupted.", error: true };
+      const cwd = this.session.cwd;
+      const session: Session = { id, cwd, model: this.cfg.model, messages: [{ role: "system", content: agentPrompt(cwd) }], updated: "" };
+      const view = new SubView(this.view, id, description);
+      const agent = new Agent(this.cfg, session, this.contextWindow, view, { description, parent: this.session });
+      agent.allowed = this.allowed; // "don't ask again" covers its agents too
+      const stop = () => agent.stop();
+      signal.addEventListener("abort", stop);
+      const started = Date.now();
+      this.log({ type: "agent", description, task });
+      try {
+        const report = await agent.turn(task);
+        const secs = Math.round((Date.now() - started) / 1000);
+        const summary = `"${description}" · ${secs}s · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
+        if (signal.aborted) return { content: "The user interrupted the agent.", display: `stopped after ${summary}`, error: true };
+        if (!report.trim()) return { content: "The agent finished without a report.", display: `no report · ${summary}`, error: true };
+        return { content: `Report from the agent ("${description}"):\n\n${report}`, display: `${summary}\n${preview(report, 4)}` };
+      } finally {
+        signal.removeEventListener("abort", stop);
+        view.close();
+        this.view.agentUpdate(id, null);
+      }
+    });
+  }
+
+  /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
+  async turn(text: string, images: Image[] = []): Promise<string> {
+    let final = "";
     const content: Content = images.length
       ? [{ type: "text", text }, ...images.map((i): Part => ({ type: "image_url", image_url: { url: i.url } }))]
       : text;
     this.messages.push({ role: "user", content });
-    log(this.session, { type: "user", content: storeContent(content) });
+    this.log({ type: "user", content: storeContent(content) });
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const started = Date.now();
@@ -100,7 +216,8 @@ export class Agent {
         if (this.used > this.cfg.compactAt * this.contextWindow) await this.compact(signal, true);
         const reply = await this.generate(signal);
         if (!reply) break;
-        log(this.session, {
+        final = reply.content;
+        this.log({
           type: "assistant",
           content: reply.content,
           reasoning: reply.reasoning || undefined,
@@ -123,16 +240,17 @@ export class Agent {
       }
     } catch (e: any) {
       if (!signal.aborted) this.view.notice(`error: ${e.message}`, "error");
-      log(this.session, { type: "error", message: e.message });
+      this.log({ type: "error", message: e.message });
     } finally {
       this.abort = undefined;
-      saveSession(this.session);
+      if (!this.sub) saveSession(this.session);
     }
     this.view.turnDone({
       seconds: (Date.now() - started) / 1000,
       status: this.used ? this.status() : "",
       stopped: signal.aborted,
     });
+    return final;
   }
 
   status(): string {
@@ -187,23 +305,33 @@ export class Agent {
       if (signal.aborted) {
         // Keep the history well-formed: every user message gets an answer.
         this.messages.push({ role: "assistant", content: (printed ? printed + "\n" : "") + "[interrupted by the user]" });
-        log(this.session, { type: "interrupted", content: printed });
+        this.log({ type: "interrupted", content: printed });
         return null;
       }
       this.view.notice(`error: ${e.message}`, "error");
       this.messages.push({ role: "assistant", content: `[request failed: ${e.message}]` });
-      log(this.session, { type: "error", message: e.message });
+      this.log({ type: "error", message: e.message });
       return null;
     }
   }
 
   private async runTools(calls: ToolCall[], signal: AbortSignal): Promise<void> {
-    for (const call of calls) {
-      const result: ToolResult = signal.aborted
-        ? { content: "Not run: the user interrupted.", error: true }
-        : await this.runTool(call, signal);
+    const interrupted: ToolResult = { content: "Not run: the user interrupted.", error: true };
+    for (let i = 0; i < calls.length; ) {
+      // Agent calls side by side run at the same time; everything else in turn.
+      let j = i + 1;
+      if (calls[i].function.name === "agent") while (j < calls.length && calls[j].function.name === "agent") j++;
+      const batch = calls.slice(i, j);
+      const results = await Promise.all(batch.map((c) => (signal.aborted ? interrupted : this.runTool(c, signal))));
+      batch.forEach((c, n) => this.record(c, results[n]));
+      i = j;
+    }
+  }
+
+  private record(call: ToolCall, result: ToolResult) {
+    {
       this.messages.push({ role: "tool", tool_call_id: call.id, content: result.content });
-      log(this.session, {
+      this.log({
         type: "tool",
         id: call.id,
         name: call.function.name,
@@ -305,13 +433,13 @@ export class Agent {
     const running = this.jobs.list().filter((j) => !j.exit);
     if (running.length) text += `\n\nBackground jobs still running:\n${running.map((j) => `${j.id}: ${j.command}`).join("\n")}`;
     const content: Content = images.length ? [{ type: "text", text }, ...images] : text;
-    log(this.session, { type: "compact", tokensBefore: this.used, summary });
+    this.log({ type: "compact", tokensBefore: this.used, summary });
     this.session.messages = [this.messages[0], { role: "user", content }];
     if (!midTurn) this.session.messages.push({ role: "assistant", content: "Got it. What next?" });
     this.estimateUsed();
     this.seen.clear();
     this.view.notice(`Compacted: ~${k(before)} → ~${k(this.used)} tokens`);
-    saveSession(this.session);
+    if (!this.sub) saveSession(this.session);
   }
 
   /** /compact from the prompt. */

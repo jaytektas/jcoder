@@ -14,6 +14,7 @@ bump=${1:?usage: scripts/release.sh patch|minor|major|X.Y.Z}
 branch=$(git branch --show-current)
 case "$branch" in master|main) ;; *) echo "release from master or main, not $branch" >&2; exit 1 ;; esac
 command -v gh >/dev/null || { echo "needs the GitHub CLI (gh)" >&2; exit 1; }
+grep -q "^## " CHANGELOG.md || { echo "CHANGELOG.md needs a section for the release" >&2; exit 1; }
 
 npm ci --no-audit --no-fund
 npm run build
@@ -31,6 +32,9 @@ git push --follow-tags
 # The same package as jcoder.tgz too, so releases/latest/download/jcoder.tgz
 # is a stable install URL.
 cp "$tgz" jcoder.tgz
-gh release create "v$version" "$tgz" jcoder.tgz --title "jcoder $version" --generate-notes
+# Notes: this version's section of CHANGELOG.md.
+notes=$(awk -v v="## $version" '$0 == v {on=1; next} /^## / {on=0} on' CHANGELOG.md)
+[ -n "$notes" ] || notes="jcoder $version"
+gh release create "v$version" "$tgz" jcoder.tgz --title "jcoder $version" --notes "$notes"
 rm -f "$tgz" jcoder.tgz
 echo "released jcoder $version"

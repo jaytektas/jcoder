@@ -26,7 +26,7 @@ import { listSessions, logPath, newSession, openSession, title, type Session } f
 import type { Approval, Todo } from "./tools.js";
 import { LOGO_WIDTH, logo } from "./logo.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
-import type { View } from "./view.js";
+import type { AgentStatus, View } from "./view.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
 const MODE_LABEL: Record<Mode, [string, string]> = {
@@ -172,6 +172,29 @@ function Spinner({ label, detail, since, progress }: { label: string; detail: st
   );
 }
 
+/** One running sub-agent: what it's for, what it's doing, how long, how many tools. */
+function AgentLine({ st }: { st: AgentStatus }) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setFrame((f) => f + 1), 120);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.floor((Date.now() - st.started) / 1000);
+  const doing = st.last && st.label.startsWith("Running") ? st.last : [st.label, st.detail].filter(Boolean).join(" · ");
+  return (
+    <Text wrap="truncate-end">
+      <Text color="blue">
+        {"  "}
+        {SPIN[frame % SPIN.length]} {st.description}
+      </Text>
+      <Text color="gray">
+        {"  "}
+        {secs}s · {st.tools} tool{st.tools === 1 ? "" : "s"} · {doing}
+      </Text>
+    </Text>
+  );
+}
+
 function Picker({ title, options, onPick }: { title: string; options: string[]; onPick(i: number | null): void }) {
   const [sel, setSel] = useState(0);
   useInput((input, key) => {
@@ -213,7 +236,14 @@ function App(props: Props) {
   const [liveThought, setLiveThought] = useState("");
   const [busy, setBusy] = useState<{ label: string; detail: string; since: number; progress?: number } | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
-  const [ask, setAsk] = useState<Ask | null>(null);
+  // Permission questions queue up: several agents can ask at once.
+  const [asks, setAsks] = useState<Ask[]>([]);
+  const ask = asks[0] ?? null;
+  const answerAsk = (a: Approval) => {
+    ask?.resolve(a);
+    setAsks((q) => q.slice(1));
+  };
+  const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map());
   const [question, setQuestion] = useState<Question | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
@@ -343,13 +373,21 @@ function App(props: Props) {
     },
     notice,
     approve(tool, summary) {
-      return new Promise((resolve) => setAsk({ tool, summary, typing: false, resolve }));
+      return new Promise((resolve) => setAsks((q) => [...q, { tool, summary, typing: false, resolve }]));
     },
     ask(q, options) {
       return new Promise((resolve) => setQuestion({ question: q, options, typing: options.length === 0, resolve }));
     },
     todos(items) {
       setTodos(items);
+    },
+    agentUpdate(id, status) {
+      setAgents((m) => {
+        const next = new Map(m);
+        if (status) next.set(id, status);
+        else next.delete(id);
+        return next;
+      });
     },
     turnDone({ seconds, status, stopped }) {
       setBusy(null);
@@ -657,6 +695,13 @@ function App(props: Props) {
 
       {liveThought && <BlockView b={blocks.thought(fit(liveThought), !s.current.thoughtStarted)} />}
       {live && <BlockView b={blocks.reply(fit(s.current.inCode ? renderLines(live, true)[0] : live), !s.current.replyStarted)} />}
+      {agents.size > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {[...agents.entries()].map(([id, st]) => (
+            <AgentLine key={id} st={st} />
+          ))}
+        </Box>
+      )}
       {busy && <Spinner {...busy} />}
 
       {queue.map((q, i) => (
@@ -683,10 +728,8 @@ function App(props: Props) {
           title={`Allow ${ask.tool}?  ${ask.summary.split("\n")[0].slice(0, 200)}`}
           options={["Yes", `Yes, and don't ask again for ${ask.tool} this session`, "No, and tell it what to do instead"]}
           onPick={(i) => {
-            if (i === 2) return setAsk({ ...ask, typing: true });
-            const r = ask.resolve;
-            setAsk(null);
-            r(i === null ? { ok: false } : { ok: true, always: i === 1 });
+            if (i === 2) return setAsks((q) => [{ ...q[0], typing: true }, ...q.slice(1)]);
+            answerAsk(i === null ? { ok: false } : { ok: true, always: i === 1 });
           }}
         />
       )}
@@ -698,14 +741,10 @@ function App(props: Props) {
             cwd={cwd}
             keepHistory={false}
             onSubmit={(t) => {
-              const r = ask.resolve;
-              setAsk(null);
-              r({ ok: false, reason: t.trim() || undefined });
+              answerAsk({ ok: false, reason: t.trim() || undefined });
             }}
             onEscape={() => {
-              const r = ask.resolve;
-              setAsk(null);
-              r({ ok: false });
+              answerAsk({ ok: false });
             }}
           />
         </Box>

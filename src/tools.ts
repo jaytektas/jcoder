@@ -53,6 +53,8 @@ export interface ToolContext {
   /** Puts a question to the user; null if they didn't answer. */
   ask(question: string, options: string[]): Promise<string | null>;
   setTodos(items: Todo[]): void;
+  /** Starts a sub-agent and resolves with its report; missing inside a sub-agent. */
+  runAgent?(description: string, task: string): Promise<ToolResult>;
   approve(tool: string, summary: string): Promise<Approval>;
   /** path -> mtime when the model last read or wrote it. */
   seen: Map<string, number>;
@@ -466,6 +468,30 @@ const askModel: Tool = {
   },
 };
 
+const agentTool: Tool = {
+  schema: def(
+    "agent",
+    "Hand a self-contained job to a sub-agent with a fresh context: exploring or searching a large codebase, " +
+      "researching a question, or a well-defined change. It has the same tools, sees nothing of this conversation, " +
+      "and returns a report, so the task must say everything it needs (goal, paths, what to report back). " +
+      "Several agent calls in one reply run at the same time. Use it to keep your own context small, " +
+      "not for a lookup you can do in a call or two.",
+    {
+      description: str("3 to 6 words for the screen, e.g. \"find the CAN frame parser\""),
+      task: str("The whole job, written for someone who knows nothing of this conversation"),
+    },
+    ["description", "task"],
+  ),
+  writes: false,
+  summary: (a) => String(a.description ?? ""),
+  async run(a, ctx) {
+    if (!ctx.runAgent) return fail("A sub-agent can't start agents of its own. Do it yourself.");
+    const task = String(a.task ?? "").trim();
+    if (!task) return fail("task is empty.");
+    return ctx.runAgent(String(a.description ?? "agent").slice(0, 60), task);
+  },
+};
+
 const hasRg = spawnSync("rg", ["--version"]).status === 0;
 const SKIP_DIRS = [".git", "node_modules", "dist", "build", ".venv", "__pycache__", "target"];
 
@@ -571,7 +597,7 @@ const fetchPage: Tool = {
 };
 
 export const TOOLS: Record<string, Tool> = Object.fromEntries(
-  [readFile, writeFile, editFile, bash, bashOutput, bashStop, grep, glob, search, fetchPage, todo, askUser, askModel].map((t) => [
+  [readFile, writeFile, editFile, bash, bashOutput, bashStop, grep, glob, search, fetchPage, todo, askUser, askModel, agentTool].map((t) => [
     t.schema.function.name,
     t,
   ]),
@@ -582,9 +608,13 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
  * and changing it would throw away the server's cache. Read-only mode refuses
  * writing tools when they're called instead.
  */
-export function schemas(opts: { askModel: AskModel; searchUrl: string }): ToolSchema[] {
+/** Tools a sub-agent doesn't get: it can't start agents, ask the user, or own the to-do list. */
+const MAIN_ONLY = new Set(["agent", "ask_user", "todo"]);
+
+export function schemas(opts: { askModel: AskModel; searchUrl: string }, sub = false): ToolSchema[] {
   // Tools that need setting up are only offered once they are.
   return Object.values(TOOLS)
+    .filter((t) => !sub || !MAIN_ONLY.has(t.schema.function.name))
     .filter((t) => t.schema.function.name !== "ask_model" || opts.askModel.apiKey)
     .filter((t) => t.schema.function.name !== "web_search" || opts.searchUrl)
     .map((t) =>
