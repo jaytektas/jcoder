@@ -15,7 +15,7 @@ const USAGE = `jcoder — a coding agent for a local OpenAI-compatible server
   jcoder                 start
   jcoder -c              continue the last conversation in this directory
   jcoder -p "prompt"     run one request and exit
-  options: --mode ro|edit|auto  --model ID  --url http://host:port`;
+  options: --mode ro|edit|auto  --yolo (= --mode auto)  --model ID  --url http://host:port`;
 
 function parseArgs(argv: string[]) {
   const o: { print?: string; cont: boolean; mode?: Mode; model?: string; url?: string } = { cont: false };
@@ -31,7 +31,8 @@ function parseArgs(argv: string[]) {
       const m = next() as Mode;
       if (!MODES.includes(m)) throw new Error(`--mode must be ro, edit or auto`);
       o.mode = m;
-    } else if (a === "--model") o.model = next();
+    } else if (a === "--yolo") o.mode = "auto";
+    else if (a === "--model") o.model = next();
     else if (a === "--url") o.url = next().replace(/\/+$/, "");
     else if (a === "-h" || a === "--help") {
       console.log(USAGE);
