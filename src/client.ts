@@ -67,6 +67,9 @@ export async function listModels(cfg: Config): Promise<string[]> {
   return (j.data ?? []).map((m: any) => m.id);
 }
 
+/** Set once /props answers: the server is llama.cpp. */
+let llamaCpp = false;
+
 /** llama.cpp reports its context size at /props; other servers don't. */
 export async function serverContext(cfg: Config): Promise<number | undefined> {
   try {
@@ -74,7 +77,9 @@ export async function serverContext(cfg: Config): Promise<number | undefined> {
     if (!r.ok) return undefined;
     const j: any = await r.json();
     const n = j.default_generation_settings?.n_ctx;
-    return typeof n === "number" && n > 0 ? n : undefined;
+    if (typeof n !== "number" || n <= 0) return undefined;
+    llamaCpp = true;
+    return n;
   } catch {
     return undefined;
   }
@@ -149,8 +154,10 @@ export async function chat(
     return_progress: true,
   };
   // Effort. llama.cpp caps thinking with reasoning_budget_tokens and then
-  // makes the model answer; other servers read reasoning_effort. Each
-  // ignores the other's field.
+  // makes the model answer. Other servers get reasoning_effort instead; not
+  // llama.cpp, which hands it to the chat template, and templates accept
+  // their own set of values (one here takes low/medium/xhigh and errors on
+  // "high").
   const effort = opts.effort ?? cfg.effort;
   const budget = EFFORT_BUDGET[effort];
   body.chat_template_kwargs = { enable_thinking: effort !== "off" };
@@ -158,7 +165,7 @@ export async function chat(
     body.reasoning_budget_tokens = budget;
     body.reasoning_budget_message = "\n\nThat's my thinking budget used up; I'll answer now with what I have.\n";
   }
-  if (effort === "low" || effort === "medium" || effort === "high") body.reasoning_effort = effort;
+  if (!llamaCpp && (effort === "low" || effort === "medium" || effort === "high")) body.reasoning_effort = effort;
   if (tools.length) body.tools = tools;
   if (opts.toolChoice) body.tool_choice = opts.toolChoice;
   if (opts.maxTokens) body.max_tokens = opts.maxTokens;
