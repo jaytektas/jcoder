@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepack": "npm run build"
   },
   "license": "GPL-3.0-or-later",
   "devDependencies": {
@@ -25,5 +26,23 @@
     "react": "^19.3.0",
     "wrap-ansi": "^10.0.2"
   },
-  "author": "Jason Roughley"
+  "author": "Jason Roughley",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jaytektas/jcoder.git"
+  },
+  "homepage": "https://github.com/jaytektas/jcoder",
+  "files": [
+    "dist",
+    "prompts",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "llm",
+    "coding-agent",
+    "llama.cpp",
+    "cli",
+    "terminal"
+  ]
 }

@@ -31,6 +31,7 @@ export const COMMANDS: Command[] = [
   { name: "ctx", desc: "context use" },
   { name: "prompt", args: "[edit]", desc: "show the system prompt; edit makes a copy to change" },
   { name: "log", desc: "where this conversation's full log is" },
+  { name: "update", desc: "check for a new jcoder release and install it" },
   { name: "exit", desc: "quit (also ctrl+d)" },
 ];
 

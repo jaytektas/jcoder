@@ -24,6 +24,7 @@ import { renderLines, renderMarkdown } from "./markdown.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
 import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
+import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { View } from "./view.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
@@ -386,14 +387,47 @@ function App(props: Props) {
   useEffect(() => {
     const n = notes(cwd);
     const lines = [
-      `${ansi.bold(ansi.magenta("◆ jcoder"))}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
+      `${ansi.bold(ansi.magenta("◆ jcoder"))} ${ansi.gray(VERSION)}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
       ansi.gray(`  ${tilde(cwd)}`),
       ...(n.length ? [ansi.gray(`  notes: ${n.map((x) => tilde(x.file)).join(", ")}`)] : []),
       ansi.gray("  / for commands · @ for files · ctrl+v pastes an image · esc stops the model"),
     ];
     push({ text: lines.join("\n") });
     if (props.resumed) replay(props.session);
+    if (cfg.checkUpdates) void update(false);
   }, []);
+
+  /** Looks for a newer release and asks what to do; quiet unless asked or there's news. */
+  const update = async (asked: boolean) => {
+    try {
+      const rel = await checkForUpdate(asked);
+      if (!rel) {
+        if (asked) notice(`jcoder ${VERSION} is the latest.`);
+        return;
+      }
+      const can = selfUpdate();
+      const later = ["Not now", `Skip ${rel.version}`, "Stop checking for updates"];
+      const i = await choose(
+        `jcoder ${rel.version} is available (you have ${VERSION}).${can.ok ? "" : ` It can't install itself: ${can.why}.`}`,
+        can.ok ? ["Install it now", ...later] : later,
+      );
+      const choice = i === null ? "Not now" : (can.ok ? ["Install it now", ...later] : later)[i];
+      if (choice === `Skip ${rel.version}`) {
+        skipVersion(rel.version);
+        notice(`Won't ask about ${rel.version} again. /update installs it any time.`);
+      } else if (choice === "Stop checking for updates") {
+        cfg.checkUpdates = false;
+        saveConfig(cfg);
+        notice("Update checks off. /update still checks, or set checkUpdates in the settings.");
+      } else if (choice === "Install it now") {
+        notice(`Installing jcoder ${rel.version} in the background…`);
+        await install(rel.url);
+        notice(`Updated to jcoder ${rel.version}. Restart jcoder to use it.`, "warn");
+      }
+    } catch (e: any) {
+      if (asked) notice(`Update failed: ${e.message}`, "error");
+    }
+  };
 
   // ---------- running turns ----------
 
@@ -534,6 +568,9 @@ function App(props: Props) {
       }
       case "ctx":
         notice(a.status());
+        break;
+      case "update":
+        await update(true);
         break;
       case "log":
         notice(logPath(a.session));

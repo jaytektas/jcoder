@@ -48,6 +48,8 @@ export interface Config {
   /** SearXNG server for the web_search tool; empty turns it off. */
   searchUrl: string;
   askModel: AskModel;
+  /** Look for new releases on GitHub (at most once a day) and offer to install them. */
+  checkUpdates: boolean;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
@@ -70,6 +72,7 @@ const DEFAULTS: Config = {
   maxToolChars: 24000,
   bashTimeout: 120,
   searchUrl: "http://127.0.0.1:8888",
+  checkUpdates: true,
   askModel: {
     name: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -111,7 +114,7 @@ export function saveConfig(cfg: Config): void {
   try {
     file = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
   } catch {}
-  for (const k of ["effort", "showThinking", "mode"] as const) file[k] = cfg[k];
+  for (const k of ["effort", "showThinking", "mode", "checkUpdates"] as const) file[k] = cfg[k];
   delete file.thinking;
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(file, null, 2) + "\n");

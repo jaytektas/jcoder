@@ -16,6 +16,7 @@ import { listModels, serverContext } from "./client.js";
 import { loadConfig, type Config, type Mode } from "./config.js";
 import { systemPrompt } from "./prompt.js";
 import { listSessions, newSession, openSession } from "./session.js";
+import { VERSION } from "./update.js";
 import { PlainView } from "./view.js";
 
 const MODES: Mode[] = ["ro", "edit", "auto"];
@@ -25,6 +26,7 @@ const USAGE = `jcoder — a coding agent for a local OpenAI-compatible server
   jcoder                 start
   jcoder -c              continue the last conversation in this directory
   jcoder -p "prompt"     run one request and exit
+  jcoder --version
   options: --mode ro|edit|auto  --yolo (= --mode auto)  --model ID  --url http://host:port`;
 
 function parseArgs(argv: string[]) {
@@ -44,7 +46,10 @@ function parseArgs(argv: string[]) {
     } else if (a === "--yolo") o.mode = "auto";
     else if (a === "--model") o.model = next();
     else if (a === "--url") o.url = next().replace(/\/+$/, "");
-    else if (a === "-h" || a === "--help") {
+    else if (a === "-v" || a === "--version") {
+      console.log(`jcoder ${VERSION}`);
+      process.exit(0);
+    } else if (a === "-h" || a === "--help") {
       console.log(USAGE);
       process.exit(0);
     } else throw new Error(`unknown option ${a}\n\n${USAGE}`);

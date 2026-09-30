@@ -111,6 +111,7 @@ it always shows what there is:
 | `showThinking` | false | `/thoughts`, Ctrl+T |
 | `mode` | `edit` | `ro` read-only · `edit` edits freely, asks before commands · `auto` asks nothing |
 | `maxToolChars` | 24000 | tool results longer than this are cut |
+| `checkUpdates` | true | look for new GitHub releases once a day and offer them; `/update` checks any time |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | `http://127.0.0.1:8888` | SearXNG server for `web_search`; empty turns it off |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
