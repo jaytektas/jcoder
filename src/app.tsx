@@ -482,6 +482,10 @@ function App(props: Props) {
         else setMode(m);
         break;
       }
+      case "yolo":
+        setMode("auto");
+        notice("Auto mode: commands and edits run without asking. Shift+tab to change back.", "warn");
+        break;
       case "effort": {
         const e = (arg || EFFORTS[(EFFORTS.indexOf(cfg.effort) + 1) % EFFORTS.length]) as Effort;
         if (!EFFORTS.includes(e)) notice("Effort: off, low, medium, high or max", "error");
