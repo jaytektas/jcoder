@@ -209,6 +209,29 @@ out, the model is told to answer. It works with models whose thinking
 llama.cpp recognises, such as Qwen3 and DeepSeek-R1 styles. Other servers
 get `reasoning_effort` instead, which is a hint rather than a limit.
 
+## Sampling
+
+Models have recommended sampling settings, often different for thinking and
+not thinking. Set them per model and jcoder sends the right set with every
+request, whatever the server was started with:
+
+```json
+"sampling": {
+  "qwen3.6-35b-a3b": {
+    "thinking":   { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0, "presence_penalty": 0 },
+    "noThinking": { "temperature": 0.7, "top_p": 0.8,  "top_k": 20, "min_p": 0, "presence_penalty": 1.5 }
+  },
+  "qwen*": { "thinking": { "temperature": 0.6 } },
+  "*":     { "thinking": { "temperature": 0.7 } }
+}
+```
+
+A key is a model id, a pattern (`qwen*`) or `*`; the most specific match
+wins. `noThinking` is used when `/effort` is off. The fields go to the
+server as written, so anything it understands works. A model with no match
+gets the server's own settings. `/sampling` shows what's in use; the model
+card usually says what to use (the example is Qwen's advice for coding).
+
 ## Settings
 
 `~/.jcoder/config.json` (or `$JCODER_CONFIG`). It's written with every
@@ -231,7 +254,8 @@ setting and its default on first run, so everything you can change is in it.
 | `dropAdvisors` | `session` | an advisor that ignores us: `never`, `session`, `day`, `week`, `month`, `year`, `permanent` |
 | `checkUpdates` | true | offer new releases once a day |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
-| `extraBody` | `{}` | merged into every request, e.g. sampling parameters |
+| `sampling` | `{}` | per-model sampling, see [Sampling](#sampling) |
+| `extraBody` | `{}` | merged into every request |
 
 **Project notes.** `~/.jcoder/JCODER.md` and a project's `JCODER.md` (or
 `AGENTS.md`) are added to the system prompt. Keep them short: they go with

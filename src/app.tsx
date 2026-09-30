@@ -17,7 +17,7 @@ import { Agent, k } from "./agent.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf } from "./client.js";
 import { COMMANDS } from "./complete.js";
-import { EFFORT_BUDGET, EFFORTS, saveConfig, type Config, type Effort, type Mode } from "./config.js";
+import { EFFORT_BUDGET, EFFORTS, samplingFor, saveConfig, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown } from "./markdown.js";
@@ -625,6 +625,18 @@ function App(props: Props) {
       case "ctx":
         notice(a.status());
         break;
+      case "sampling": {
+        const s = samplingFor(cfg);
+        if (!s) {
+          notice(`No sampling settings match ${cfg.model}; the server's own apply. Add them under "sampling" in the settings.`);
+          break;
+        }
+        const show = (p?: Record<string, unknown>) => (p ? Object.entries(p).map(([k, v]) => `${k} ${v}`).join(", ") : "the server's own");
+        notice(`Sampling for ${cfg.model}${s.key !== cfg.model ? ` (from "${s.key}")` : ""}:`);
+        notice(`  thinking: ${show(s.profile.thinking)}`);
+        notice(`  no thinking: ${show(s.profile.noThinking)}${cfg.effort === "off" ? "   ← in use (effort off)" : ""}`);
+        break;
+      }
       case "advisors": {
         const list = a.advisors;
         for (const s of cfg.advisors) {

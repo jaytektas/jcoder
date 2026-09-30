@@ -10,6 +10,12 @@
   times running) is dropped for the session, a day, week, month, year or for
   good, per `dropAdvisors`; timed and permanent drops are saved in the
   settings.
+- **Sampling per model.** Set temperature and friends for each model, one
+  set for thinking and one for not; jcoder sends them with every request.
+  `/sampling` shows what's in use.
+- **No more rewrite loops.** Redoing the same file or command four times in a
+  row gets a nudge to stop; a sub-agent is told to wrap up at 30 tool calls
+  and must report at 45.
 
 ## 0.2.0
 

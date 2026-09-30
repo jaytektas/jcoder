@@ -103,6 +103,12 @@ class SubView implements View {
   }
 }
 
+/** A sub-agent is told to wrap up at SUB_SOFT tool calls and stopped for its report at SUB_HARD. */
+const SUB_SOFT = 30;
+const SUB_HARD = 45;
+/** The same tool on the same target this many times in a row gets a nudge to stop redoing it. */
+const REDO_LIMIT = 4;
+
 export class Agent {
   /** Tokens the next request's prompt will be, roughly: last prompt + last reply. */
   used = 0;
@@ -115,6 +121,10 @@ export class Agent {
   private abort?: AbortController;
   /** Consecutive identical tool calls, to catch loops. */
   private repeat = { key: "", result: "", count: 0 };
+  /** The same tool on the same target in a row, whatever the content: redoing one thing. */
+  private redo = { key: "", count: 0 };
+  /** Tool calls in the current turn, for a sub-agent's budget. */
+  private calls = 0;
   readonly jobs = new Jobs();
   todos: Todo[] = [];
   /** Fixed for the session: the tool list is part of the prompt the server caches. */
@@ -245,6 +255,7 @@ export class Agent {
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const started = Date.now();
+    this.calls = 0;
     try {
       for (;;) {
         if (this.used > this.cfg.compactAt * this.contextWindow) await this.compact(signal, true);
@@ -271,6 +282,19 @@ export class Agent {
         if (!reply.toolCalls.length) break;
         await this.runTools(reply.toolCalls, signal);
         if (signal.aborted) break;
+        if (this.sub && this.calls >= SUB_HARD) {
+          // Out of budget: no more tools, just the report.
+          const ask = `You've used ${this.calls} tool calls, the limit for a sub-agent. Stop now and write your report: what's done, what isn't, and what you found.`;
+          this.messages.push({ role: "user", content: ask });
+          this.log({ type: "user", content: ask });
+          const last = await this.generate(signal, true);
+          if (last) {
+            final = last.content;
+            this.messages.push({ role: "assistant", content: last.content || null });
+            this.log({ type: "assistant", content: last.content, reasoning: last.reasoning || undefined, usage: last.usage });
+          }
+          break;
+        }
       }
     } catch (e: any) {
       if (!signal.aborted) this.view.notice(`error: ${e.message}`, "error");
@@ -299,7 +323,7 @@ export class Agent {
   }
 
   /** One model call, streamed to the view. Returns null if interrupted or failed. */
-  private async generate(signal: AbortSignal): Promise<Reply | null> {
+  private async generate(signal: AbortSignal, noTools = false): Promise<Reply | null> {
     let thinkTokens = 0;
     let printed = "";
     this.view.busy("Thinking");
@@ -323,6 +347,7 @@ export class Agent {
           onPromptProgress: readingProgress(this.view, "Reading"),
         },
         signal,
+        noTools ? { toolChoice: "none" } : {},
       );
       this.view.endMessage();
       if (reply.usage) {
@@ -407,6 +432,18 @@ export class Agent {
       }
     }
     this.view.result(result.display ?? preview(textOf(result.content), 6), !!result.error);
+
+    this.calls++;
+    const target = args.path ?? args.command ?? args.url ?? args.pattern;
+    const redoKey = target === undefined ? "" : `${name}:${target}`;
+    if (redoKey && redoKey === this.redo.key) this.redo.count++;
+    else this.redo = { key: redoKey, count: 1 };
+    if (this.redo.count >= REDO_LIMIT && typeof result.content === "string") {
+      const what = name === "write_file" ? `rewritten ${target}` : name === "edit_file" ? `edited ${target}` : `run ${name} on ${String(target).slice(0, 80)}`;
+      result.content += `\n\n[You've ${what} ${this.redo.count} times in a row. Stop redoing it: it's done unless something is actually broken. Move on, or finish.]`;
+    }
+    if (this.sub && this.calls === SUB_SOFT && typeof result.content === "string")
+      result.content += `\n\n[That's ${SUB_SOFT} tool calls. Wrap up: finish only what's essential, then write your report. At ${SUB_HARD} your tools stop.]`;
 
     const key = name + call.function.arguments;
     const text = textOf(result.content);

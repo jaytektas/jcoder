@@ -8,7 +8,7 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
-import { EFFORT_BUDGET, type Config, type Effort } from "./config.js";
+import { EFFORT_BUDGET, samplingFor, type Config, type Effort } from "./config.js";
 
 export interface ToolCall {
   id: string;
@@ -179,6 +179,9 @@ export async function chat(
     body.reasoning_budget_message = "\n\nThat's my thinking budget used up; I'll answer now with what I have.\n";
   }
   if (!llamaCpp && (effort === "low" || effort === "medium" || effort === "high")) body.reasoning_effort = effort;
+  // The model's sampling settings, thinking or not, from the settings.
+  const sampling = samplingFor(cfg)?.profile[effort === "off" ? "noThinking" : "thinking"];
+  if (sampling) Object.assign(body, sampling);
   if (tools.length) body.tools = tools;
   if (opts.toolChoice) body.tool_choice = opts.toolChoice;
   if (opts.maxTokens) body.max_tokens = opts.maxTokens;

@@ -51,8 +51,33 @@ export interface Config {
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
   compactAt: number;
-  /** Extra fields merged into every request (sampling params etc). */
+  /** Extra fields merged into every request. */
   extraBody: Record<string, unknown>;
+  /**
+   * Sampling per model: key = model id, a pattern like "qwen*", or "*"; the
+   * most specific match wins. "thinking" is sent when effort isn't off,
+   * "noThinking" when it is; fields go to the server as written. A model
+   * with no match gets the server's own settings.
+   */
+  sampling: Record<string, SamplingProfile>;
+}
+
+export interface SamplingProfile {
+  thinking?: Record<string, unknown>;
+  noThinking?: Record<string, unknown>;
+}
+
+/** The sampling entry for a model, and which key matched: exact id, then the longest matching pattern, then "*". */
+export function samplingFor(cfg: Config): { key: string; profile: SamplingProfile } | null {
+  const model = cfg.model.toLowerCase();
+  const entries = Object.entries(cfg.sampling ?? {});
+  const exact = entries.find(([k]) => k.toLowerCase() === model);
+  if (exact) return { key: exact[0], profile: exact[1] };
+  const glob = (k: string) => new RegExp("^" + k.toLowerCase().replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+  const patterns = entries.filter(([k]) => k !== "*" && /[*?]/.test(k) && glob(k).test(model)).sort((a, b) => b[0].length - a[0].length);
+  if (patterns.length) return { key: patterns[0][0], profile: patterns[0][1] };
+  const any = entries.find(([k]) => k === "*");
+  return any ? { key: "*", profile: any[1] } : null;
 }
 
 export const HOME = path.join(os.homedir(), ".jcoder");
@@ -75,6 +100,7 @@ const DEFAULTS: Config = {
   dropAdvisors: "session",
   compactAt: 0.85,
   extraBody: {},
+  sampling: {},
 };
 
 /**
