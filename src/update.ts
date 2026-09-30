@@ -8,7 +8,7 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,29 +96,44 @@ export async function checkForUpdate(force = false): Promise<Release | null> {
   return { version, url: asset.browser_download_url, page: j.html_url };
 }
 
+/** The npm that belongs to the node running us (a private node brings its own), else the one on PATH. */
+function npmBin(): string {
+  const own = path.join(path.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
+  return fs.existsSync(own) ? own : "npm";
+}
+
 /**
- * Whether this copy can replace itself: only an npm global install. A git
- * checkout (a development copy) is updated with git pull instead.
+ * Whether this copy can replace itself: any npm install, wherever its prefix
+ * (<prefix>/lib/node_modules/jcoder). A git checkout, a development copy, is
+ * updated with git pull instead.
  */
 export function selfUpdate(): { ok: true; prefix: string } | { ok: false; why: string } {
   if (fs.existsSync(path.join(PKG_DIR, ".git"))) return { ok: false, why: "this is a git checkout: git pull and npm run build" };
-  const r = spawnSync("npm", ["prefix", "-g"], { encoding: "utf8" });
-  if (r.status !== 0) return { ok: false, why: "npm isn't available" };
-  const prefix = r.stdout.trim();
-  const inPrefix = PKG_DIR === path.join(prefix, "lib", "node_modules", "jcoder") || PKG_DIR === path.join(prefix, "node_modules", "jcoder");
-  if (!inPrefix) return { ok: false, why: `jcoder isn't installed by npm here (${PKG_DIR})` };
+  const modules = path.dirname(PKG_DIR);
+  const lib = path.dirname(modules);
+  if (path.basename(PKG_DIR) !== "jcoder" || path.basename(modules) !== "node_modules")
+    return { ok: false, why: `jcoder wasn't installed by npm (${PKG_DIR})` };
+  // Unix: <prefix>/lib/node_modules; Windows: <prefix>/node_modules.
+  const prefix = path.basename(lib) === "lib" ? path.dirname(lib) : lib;
   try {
-    fs.accessSync(PKG_DIR, fs.constants.W_OK);
+    fs.accessSync(modules, fs.constants.W_OK);
   } catch {
-    return { ok: false, why: `no write access to ${PKG_DIR}` };
+    return { ok: false, why: `no write access to ${modules}` };
   }
   return { ok: true, prefix };
 }
 
-/** npm install -g of the release file. The running copy keeps working; the next start is the new version. */
+/**
+ * npm install of the release file into the prefix this copy came from. The
+ * running copy keeps working; the next start is the new version.
+ */
 export function install(url: string): Promise<void> {
+  const can = selfUpdate();
+  if (!can.ok) return Promise.reject(new Error(can.why));
   return new Promise((resolve, reject) => {
-    const child = spawn("npm", ["install", "-g", "--no-fund", "--no-audit", url], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(npmBin(), ["install", "-g", "--prefix", can.prefix, "--no-fund", "--no-audit", "--no-update-notifier", url], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
     let err = "";
     child.stderr.on("data", (d) => (err += d));
     child.on("error", reject);

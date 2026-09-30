@@ -62,7 +62,7 @@ export const HOME = path.join(os.homedir(), ".jcoder");
 export const CONFIG_PATH = process.env.JCODER_CONFIG || path.join(HOME, "config.json");
 
 const DEFAULTS: Config = {
-  baseUrl: "http://127.0.0.1:8099",
+  baseUrl: "http://127.0.0.1:8080",
   model: "",
   apiKey: "",
   contextWindow: 32768,
@@ -71,7 +71,7 @@ const DEFAULTS: Config = {
   mode: "edit",
   maxToolChars: 24000,
   bashTimeout: 120,
-  searchUrl: "http://127.0.0.1:8888",
+  searchUrl: "",
   checkUpdates: true,
   askModel: {
     name: "Gemini",
@@ -106,6 +106,17 @@ export function loadConfig(): Config {
     } catch {}
   }
   return cfg;
+}
+
+/** Writes the given settings into the file, leaving the rest as they are. */
+export function saveSettings(values: Partial<Config>): void {
+  let file: Record<string, unknown> = {};
+  try {
+    file = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch {}
+  Object.assign(file, values);
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(file, null, 2) + "\n");
 }
 
 /** Writes back only the settings the user can change from inside jcoder. */

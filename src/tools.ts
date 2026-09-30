@@ -582,9 +582,11 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
  * and changing it would throw away the server's cache. Read-only mode refuses
  * writing tools when they're called instead.
  */
-export function schemas(opts: { askModel: AskModel }): ToolSchema[] {
+export function schemas(opts: { askModel: AskModel; searchUrl: string }): ToolSchema[] {
+  // Tools that need setting up are only offered once they are.
   return Object.values(TOOLS)
     .filter((t) => t.schema.function.name !== "ask_model" || opts.askModel.apiKey)
+    .filter((t) => t.schema.function.name !== "web_search" || opts.searchUrl)
     .map((t) =>
       t.schema.function.name === "ask_model"
         ? { ...t.schema, function: { ...t.schema.function, description: `Ask ${opts.askModel.name} (${opts.askModel.model}). ${t.schema.function.description}` } }

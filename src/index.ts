@@ -15,6 +15,7 @@ import { prepare } from "./attach.js";
 import { listModels, serverContext } from "./client.js";
 import { loadConfig, type Config, type Mode } from "./config.js";
 import { systemPrompt } from "./prompt.js";
+import { setup } from "./setup.js";
 import { listSessions, newSession, openSession } from "./session.js";
 import { VERSION } from "./update.js";
 import { PlainView } from "./view.js";
@@ -26,11 +27,12 @@ const USAGE = `jcoder — a coding agent for a local OpenAI-compatible server
   jcoder                 start
   jcoder -c              continue the last conversation in this directory
   jcoder -p "prompt"     run one request and exit
+  jcoder --setup         find or change the model server
   jcoder --version
   options: --mode ro|edit|auto  --yolo (= --mode auto)  --model ID  --url http://host:port`;
 
 function parseArgs(argv: string[]) {
-  const o: { print?: string; cont: boolean; mode?: Mode; model?: string; url?: string } = { cont: false };
+  const o: { print?: string; cont: boolean; setup: boolean; mode?: Mode; model?: string; url?: string } = { cont: false, setup: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -44,6 +46,7 @@ function parseArgs(argv: string[]) {
       if (!MODES.includes(m)) throw new Error(`--mode must be ro, edit or auto`);
       o.mode = m;
     } else if (a === "--yolo") o.mode = "auto";
+    else if (a === "--setup") o.setup = true;
     else if (a === "--model") o.model = next();
     else if (a === "--url") o.url = next().replace(/\/+$/, "");
     else if (a === "-v" || a === "--version") {
@@ -74,12 +77,24 @@ async function main() {
   if (args.mode) cfg.mode = args.mode;
   const cwd = process.cwd();
 
-  let ctxWindow: number;
-  try {
-    ctxWindow = await connect(cfg);
-  } catch (e: any) {
-    console.error(`jcoder: can't reach ${cfg.baseUrl}: ${e.cause?.message ?? e.message}`);
-    process.exit(1);
+  const interactive = process.stdin.isTTY && process.stdout.isTTY && args.print === undefined;
+  if (args.setup) {
+    if (!interactive) throw new Error("--setup needs a terminal");
+    if (!(await setup(cfg))) process.exit(1);
+  }
+
+  let ctxWindow: number | undefined;
+  while (ctxWindow === undefined) {
+    try {
+      ctxWindow = await connect(cfg);
+    } catch (e: any) {
+      const why = `Can't reach a model server at ${cfg.baseUrl} (${e.cause?.code ?? e.cause?.message ?? e.message}).`;
+      if (!interactive) {
+        console.error(`jcoder: ${why}\nStart it, or point jcoder at it: jcoder --url http://host:port (or jcoder --setup).`);
+        process.exit(1);
+      }
+      if (!(await setup(cfg, why))) process.exit(1);
+    }
   }
 
   let session = newSession(cwd, cfg.model, systemPrompt(cwd));

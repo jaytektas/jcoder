@@ -50,30 +50,38 @@ model they waste what you have. jcoder is built the other way round:
 
 ## Install
 
-You need Node.js 22 or later and an OpenAI-compatible server.
-
 ```sh
-npm install -g https://github.com/jaytektas/jcoder/releases/latest/download/jcoder.tgz
+curl -fsSL https://raw.githubusercontent.com/jaytektas/jcoder/master/install.sh | sh
 ```
 
-Then start your model server. For example, with llama.cpp:
+That's all. It installs jcoder for you alone (no root) in
+`~/.local/share/jcoder`, with the `jcoder` command in `~/.local/bin`. If
+Node.js 22 or later isn't there, it offers to download one just for jcoder.
+Run it again to reinstall; `rm -rf ~/.local/share/jcoder ~/.local/bin/jcoder`
+removes it.
+
+Then, in the project you want to work on:
 
 ```sh
-llama-server -m your-model.gguf -ngl 99 -fa on -c 131072 --port 8099
-```
-
-and run jcoder in the project you want to work on:
-
-```sh
-cd ~/my-project
 jcoder
 ```
 
-jcoder uses `http://127.0.0.1:8099` by default. Point it anywhere else with
-`jcoder --url http://host:port`, or set `baseUrl` in the settings.
+The first time, jcoder looks for a model server on the usual ports
+(llama.cpp 8080, LM Studio 1234, Ollama 11434, vLLM 8000), offers what it
+finds, or asks for an address, on this machine or another. `jcoder --setup`
+changes it later. If you don't have a server yet, llama.cpp is one command:
 
-New releases are offered when you start jcoder (at most once a day). You
-choose: install now, not now, skip that version, or stop checking.
+```sh
+llama-server -m your-model.gguf -ngl 99 -fa on -c 65536 --port 8080
+```
+
+Already have Node.js 22+? `npm install -g
+https://github.com/jaytektas/jcoder/releases/latest/download/jcoder.tgz`
+works too.
+
+**Updates.** When a new release is out, jcoder offers it at start-up (at most
+once a day): install now, not now, skip that version, or stop checking.
+`/update` checks any time.
 
 ## Using it
 
@@ -128,7 +136,7 @@ From a script: `jcoder -p "fix the failing test"` runs one request and exits.
 | `bash` | commands; `background: true` starts a server or watcher and returns at once |
 | `bash_output` `bash_stop` | read a background job's new output, or stop it |
 | `grep` `glob` | search contents, find files |
-| `web_search` `web_fetch` | search the web through [SearXNG](https://github.com/searxng/searxng), read a page |
+| `web_search` `web_fetch` | search the web through [SearXNG](https://github.com/searxng/searxng) (once `searchUrl` is set), read a page |
 | `todo` | the model's checklist for a bigger job, shown above the input |
 | `ask_user` | the model asks you a question, with choices, mid-task |
 | `ask_model` | a second opinion from a stronger remote model (only once you set a key) |
@@ -160,7 +168,7 @@ setting and its default on first run, so everything you can change is in it.
 
 | key | default | |
 |---|---|---|
-| `baseUrl` | `http://127.0.0.1:8099` | server root, without `/v1` |
+| `baseUrl` | `http://127.0.0.1:8080` | server root, without `/v1`; `jcoder --setup` finds it |
 | `model` | first listed | model id |
 | `apiKey` | | bearer token, if the server wants one |
 | `contextWindow` | 32768 | used when the server doesn't report it (llama.cpp does) |
@@ -169,7 +177,7 @@ setting and its default on first run, so everything you can change is in it.
 | `mode` | `edit` | `ro` · `edit` · `auto` |
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
-| `searchUrl` | `http://127.0.0.1:8888` | SearXNG server for `web_search`; empty turns it off |
+| `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
 | `askModel` | Gemini, no key | the remote model for `ask_model`: `name`, `baseUrl`, `apiKey`, `model` |
 | `checkUpdates` | true | offer new releases once a day |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
