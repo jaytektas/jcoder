@@ -1,0 +1,23 @@
+{
+  "name": "jcoder",
+  "version": "0.1.0",
+  "description": "A coding agent for a local OpenAI-compatible LLM server",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "bin": {
+    "jcoder": "dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "private": true
+}
