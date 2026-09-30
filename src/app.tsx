@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Box, Static, Text, render, useApp, useInput, useWindowSize } from "ink";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Box, Static, Text, render, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
 import { Agent, k } from "./agent.js";
 import { prepare } from "./attach.js";
@@ -29,13 +29,13 @@ const MODE_LABEL: Record<Mode, [string, string]> = {
  * count of lines to erase is then off by one, and every redraw leaves a copy
  * of the live text in the scrollback.
  */
-function useWrap(indent: number) {
-  const { columns } = useWindowSize();
-  const width = Math.max(20, columns - indent - 1);
+/** Terminal width, from a context so blocks can also be measured off screen. */
+const Width = createContext(80);
+
+function wrapTo(t: string, width: number): string {
   // Line by line, so each keeps its own indent; the space a line broke at
   // starts the next row, so drop it there.
-  return (t: string) =>
-    t
+  return t
       .split("\n")
       .map((line) =>
         wrapAnsi(line, width, { hard: true, trim: false })
@@ -46,12 +46,68 @@ function useWrap(indent: number) {
       .join("\n");
 }
 
+const textWidth = (columns: number, indent: number) => Math.max(20, columns - indent - 1);
+
+// ---------- blocks ----------
+
+/**
+ * Everything printed into the scrollback is a block: a prefix, then text we
+ * wrap ourselves. Its height is known before it's drawn, which keeps the
+ * input on the bottom row (see the budget in App).
+ */
+interface Block {
+  prefix?: string;
+  prefixColor?: string;
+  text: string;
+  color?: string;
+  italic?: boolean;
+  bg?: string;
+  marginTop?: number;
+}
+
+const prefixWidth = (b: Block) => [...(b.prefix ?? "")].length;
+
+function blockRows(b: Block, columns: number): number {
+  return (b.marginTop ?? 0) + wrapTo(b.text, textWidth(columns, prefixWidth(b))).split("\n").length;
+}
+
+function BlockView({ b }: { b: Block }) {
+  const columns = useContext(Width);
+  return (
+    <Box marginTop={b.marginTop ?? 0}>
+      {b.prefix && (
+        <Text color={b.prefixColor} backgroundColor={b.bg}>
+          {b.prefix}
+        </Text>
+      )}
+      <Box flexShrink={1}>
+        <Text color={b.color} italic={b.italic} backgroundColor={b.bg}>
+          {wrapTo(b.text, textWidth(columns, prefixWidth(b)))}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+const E = "\x1b[";
+const ansi = { bold: (t: string) => `${E}1m${t}${E}22m`, cyan: (t: string) => `${E}36m${t}${E}39m`, gray: (t: string) => `${E}90m${t}${E}39m`, magenta: (t: string) => `${E}35m${t}${E}39m` };
+
+const blocks = {
+  /** A piece of a reply; `text` is already rendered markdown. */
+  reply: (text: string, first: boolean): Block => ({ prefix: first ? "● " : "  ", text, marginTop: first ? 1 : 0 }),
+  thought: (text: string, first: boolean): Block => ({ prefix: first ? "✻ " : "  ", prefixColor: "gray", text, color: "gray", italic: true, marginTop: first ? 1 : 0 }),
+  user: (text: string): Block => ({ prefix: "❯ ", prefixColor: "gray", text, bg: "#303030", marginTop: 1 }),
+  tool: (name: string, summary: string): Block => ({ prefix: "● ", prefixColor: "green", text: `${ansi.bold(name)} ${summary.split("\n")[0]}`, marginTop: 1 }),
+  result: (display: string, error: boolean): Block => ({ prefix: "  ⎿  ", prefixColor: "gray", text: display, color: error ? "red" : "gray" }),
+  notice: (text: string, tone: "info" | "warn" | "error"): Block => ({ prefix: "  ", text, color: tone === "error" ? "red" : tone === "warn" ? "yellow" : "gray" }),
+};
+
 const tilde = (p: string) => (process.env.HOME && p.startsWith(process.env.HOME) ? "~" + p.slice(process.env.HOME.length) : p);
 const SPIN = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 
 interface Item {
   id: number;
-  el: ReactNode;
+  b: Block;
 }
 
 interface Pick {
@@ -76,57 +132,6 @@ interface Ask {
 }
 
 // ---------- rendering pieces ----------
-
-/** A piece of a reply; `text` is already rendered markdown. */
-function Reply({ text, first }: { text: string; first: boolean }) {
-  const wrap = useWrap(2);
-  return (
-    <Box marginTop={first ? 1 : 0}>
-      <Text>{first ? "● " : "  "}</Text>
-      <Box flexGrow={1} flexShrink={1}>
-        <Text>{wrap(text)}</Text>
-      </Box>
-    </Box>
-  );
-}
-
-function Thought({ text, first }: { text: string; first: boolean }) {
-  const wrap = useWrap(2);
-  return (
-    <Box marginTop={first ? 1 : 0}>
-      <Text color="gray">{first ? "✻ " : "  "}</Text>
-      <Box flexGrow={1} flexShrink={1}>
-        <Text color="gray" italic>
-          {wrap(text)}
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-function Result({ display, error }: { display: string; error: boolean }) {
-  const wrap = useWrap(5);
-  return (
-    <Box>
-      <Text color="gray">{"  ⎿  "}</Text>
-      <Box flexShrink={1}>
-        <Text color={error ? "red" : "gray"}>{wrap(display)}</Text>
-      </Box>
-    </Box>
-  );
-}
-
-function UserLine({ text }: { text: string }) {
-  const wrap = useWrap(2);
-  return (
-    <Box marginTop={1}>
-      <Text backgroundColor="#303030" color="gray">❯ </Text>
-      <Box flexShrink={1}>
-        <Text backgroundColor="#303030">{wrap(text)}</Text>
-      </Box>
-    </Box>
-  );
-}
 
 function Spinner({ label, detail, since }: { label: string; detail: string; since: number }) {
   const [frame, setFrame] = useState(0);
@@ -193,15 +198,35 @@ function App(props: Props) {
   const [, setTick] = useState(0);
   const rerender = () => setTick((t) => t + 1);
 
+  // Keeping the input on the bottom row: the live area gets a minimum height
+  // equal to the rows between the end of the output and the bottom of the
+  // screen (the budget), with its content pushed to the bottom. Each block
+  // printed above uses up its height of the budget; when the live area grows
+  // past the budget the screen scrolls and the budget grows with it. It stays
+  // one row short of the screen: a frame as tall as the terminal makes Ink
+  // clear the whole terminal, scrollback and all.
+  const maxBudget = Math.max(5, rows - 1);
+  const [budget, setBudget] = useState(maxBudget);
+  const liveRef = useRef<any>(null);
+  const liveBox = useBoxMetrics(liveRef);
+  useEffect(() => {
+    if (liveBox.hasMeasured && liveBox.height > budget) setBudget(Math.min(maxBudget, liveBox.height));
+  }, [liveBox.height, liveBox.hasMeasured]);
+  const lastRows = useRef(rows);
+  useEffect(() => {
+    // A taller window has more room below; a shorter one less.
+    const d = rows - lastRows.current;
+    lastRows.current = rows;
+    if (d) setBudget((b) => Math.max(0, Math.min(maxBudget, b + d)));
+  }, [rows]);
+
   const nextId = useRef(0);
-  const push = (el: ReactNode) => setItems((xs) => [...xs, { id: nextId.current++, el }]);
-  const notice = (text: string, tone: "info" | "warn" | "error" = "info") =>
-    push(
-      <Text color={tone === "error" ? "red" : tone === "warn" ? "yellow" : "gray"}>
-        {"  "}
-        {text}
-      </Text>,
-    );
+  const push = (b: Block) => {
+    const height = blockRows(b, columns);
+    setBudget((x) => Math.max(0, x - height));
+    setItems((xs) => [...xs, { id: nextId.current++, b }]);
+  };
+  const notice = (text: string, tone: "info" | "warn" | "error" = "info") => push(blocks.notice(text, tone));
 
   // Streaming state lives in refs: chunks arrive faster than React renders.
   // Every complete line goes straight into the scrollback (Static); only the
@@ -227,7 +252,7 @@ function App(props: Props) {
     if (!st.thoughtStarted) done = done.replace(/^\s+/, "");
     if (all) done = done.replace(/\s+$/, "");
     if (!done && !st.thoughtStarted) return;
-    if (done || !all) push(<Thought text={done} first={!st.thoughtStarted} />);
+    if (done || !all) push(blocks.thought(done, !st.thoughtStarted));
     st.thoughtStarted = true;
   };
 
@@ -246,7 +271,7 @@ function App(props: Props) {
     }
     const [rendered, inCode] = renderLines(done, st.inCode);
     st.inCode = inCode;
-    push(<Reply text={"\n".repeat(st.blanks) + rendered} first={!st.replyStarted} />);
+    push(blocks.reply("\n".repeat(st.blanks) + rendered, !st.replyStarted));
     st.blanks = 0;
     st.replyStarted = true;
   };
@@ -281,19 +306,10 @@ function App(props: Props) {
       setLiveThought("");
     },
     tool(name, summary) {
-      push(
-        <Box marginTop={1}>
-          <Text color="green">● </Text>
-          <Box flexShrink={1}>
-            <Text>
-              <Text bold>{name}</Text> {summary.split("\n")[0]}
-            </Text>
-          </Box>
-        </Box>,
-      );
+      push(blocks.tool(name, summary));
     },
     result(display, error) {
-      push(<Result display={display} error={error} />);
+      push(blocks.result(display, error));
     },
     notice,
     approve(tool, summary) {
@@ -307,13 +323,9 @@ function App(props: Props) {
     },
     turnDone({ seconds, status, stopped }) {
       setBusy(null);
-      if (stopped) push(<Text color="red">{"  ⎿  Interrupted · tell it what to do instead"}</Text>);
+      if (stopped) push({ prefix: "  ⎿  ", prefixColor: "red", text: "Interrupted · tell it what to do instead", color: "red" });
       const secs = seconds < 60 ? `${Math.round(seconds)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-      push(
-        <Box marginTop={1}>
-          <Text color="gray">✻ Done in {secs}{status ? ` · ${status}` : ""}</Text>
-        </Box>,
-      );
+      push({ text: `✻ Done in ${secs}${status ? ` · ${status}` : ""}`, color: "gray", marginTop: 1 });
     },
   };
   const viewRef = useRef(view);
@@ -339,33 +351,26 @@ function App(props: Props) {
     rerender();
   };
 
-  const showUser = (text: string) => push(<UserLine text={text} />);
+  const showUser = (text: string) => push(blocks.user(text));
 
   const replay = (session: Session) => {
     for (const m of session.messages.slice(1).filter((m) => (m.role === "user" || m.role === "assistant") && m.content).slice(-6)) {
       const t = textOf(m.content);
       if (m.role === "user") showUser(t.length > 800 ? t.slice(0, 800) + "…" : t);
-      else push(<Reply text={renderMarkdown(t.length > 1500 ? t.slice(0, 1500) + "…" : t)} first />);
+      else push(blocks.reply(renderMarkdown(t.length > 1500 ? t.slice(0, 1500) + "…" : t), true));
     }
   };
 
   // Banner, once.
   useEffect(() => {
     const n = notes(cwd);
-    push(
-      <Box flexDirection="column">
-        <Text>
-          <Text bold color="magenta">✻ jcoder</Text>
-          <Text color="gray">
-            {"  "}
-            {cfg.model} · ctx {k(ctxWindow)}
-          </Text>
-        </Text>
-        <Text color="gray">{"  "}{tilde(cwd)}</Text>
-        {n.length > 0 && <Text color="gray">{"  "}notes: {n.map((x) => x.file).join(", ")}</Text>}
-        <Text color="gray">{"  "}/ for commands · @ for files · ctrl+v pastes an image · esc stops the model</Text>
-      </Box>,
-    );
+    const lines = [
+      `${ansi.bold(ansi.magenta("✻ jcoder"))}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
+      ansi.gray(`  ${tilde(cwd)}`),
+      ...(n.length ? [ansi.gray(`  notes: ${n.map((x) => tilde(x.file)).join(", ")}`)] : []),
+      ansi.gray("  / for commands · @ for files · ctrl+v pastes an image · esc stops the model"),
+    ];
+    push({ text: lines.join("\n") });
     if (props.resumed) replay(props.session);
   }, []);
 
@@ -378,7 +383,7 @@ function App(props: Props) {
     const ctx = agentRef.current.toolContext(new AbortController().signal);
     const prep = await prepare(line, pasted, ctx);
     for (const e of prep.errors) notice(e, "error");
-    if (prep.notes.length) push(<Text color="gray">{"  ⎿  attached "}{prep.notes.join(", ")}</Text>);
+    if (prep.notes.length) push(blocks.result(`attached ${prep.notes.join(", ")}`, false));
     setBusy({ label: "Thinking", detail: "", since: Date.now() });
     await agentRef.current.turn(prep.text, prep.images);
     setBusy(null);
@@ -408,23 +413,19 @@ function App(props: Props) {
     switch (cmd) {
       case "help":
       case "?":
-        push(
-          <Box flexDirection="column" marginY={1}>
-            {COMMANDS.map((c) => (
-              <Text key={c.name}>
-                {"  "}
-                <Text color="cyan">{`/${c.name}${c.args ? " " + c.args : ""}`.padEnd(22)}</Text>
-                <Text color="gray">{c.desc}</Text>
-              </Text>
-            ))}
-            <Text> </Text>
-            <Text color="gray">  @path          attach a file (its text, an image, or a directory listing)</Text>
-            <Text color="gray">  ctrl+v         paste an image from the clipboard</Text>
-            <Text color="gray">  \ + enter      new line (alt+enter and ctrl+j too)</Text>
-            <Text color="gray">  shift+tab      cycle mode · ctrl+t show/hide thinking · esc stop · ctrl+d quit</Text>
-            <Text color="gray">  settings: {path.join(path.dirname(USER_TEMPLATE), "config.json")}</Text>
-          </Box>,
-        );
+        push({
+          prefix: "  ",
+          marginTop: 1,
+          text: [
+            ...COMMANDS.map((c) => ansi.cyan(`/${c.name}${c.args ? " " + c.args : ""}`.padEnd(22)) + ansi.gray(c.desc)),
+            "",
+            ansi.gray("@path          attach a file (its text, an image, or a directory listing)"),
+            ansi.gray("ctrl+v         paste an image from the clipboard"),
+            ansi.gray("\\ + enter      new line (alt+enter and ctrl+j too)"),
+            ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking · esc stop · ctrl+d quit"),
+            ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
+          ].join("\n"),
+        });
         break;
       case "exit":
       case "quit":
@@ -511,12 +512,7 @@ function App(props: Props) {
           }
           notice(`Edit ${USER_TEMPLATE}. It's used from the next /clear or new session.`);
         } else {
-          push(
-            <Box flexDirection="column" marginY={1}>
-              <Text color="gray">template: {templatePath()}</Text>
-              <Text>{systemPrompt(cwd)}</Text>
-            </Box>,
-          );
+          push({ marginTop: 1, text: `${ansi.gray(`template: ${tilde(templatePath())}`)}\n\n${systemPrompt(cwd)}` });
         }
         break;
       default:
@@ -564,16 +560,19 @@ function App(props: Props) {
   const runningJobs = a.jobs.list().filter((j) => !j.exit).length;
 
   return (
-    <>
-      <Static items={items}>{(it) => <Box key={it.id}>{it.el}</Box>}</Static>
+    <Width.Provider value={columns}>
+      <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>
 
-      {liveThought && <Thought text={fit(liveThought)} first={!s.current.thoughtStarted} />}
-      {live && <Reply text={fit(s.current.inCode ? renderLines(live, true)[0] : live)} first={!s.current.replyStarted} />}
+      <Box ref={liveRef} flexDirection="column" justifyContent="flex-end" minHeight={Math.min(budget, maxBudget)}>
+
+      {liveThought && <BlockView b={blocks.thought(fit(liveThought), !s.current.thoughtStarted)} />}
+      {live && <BlockView b={blocks.reply(fit(s.current.inCode ? renderLines(live, true)[0] : live), !s.current.replyStarted)} />}
       {busy && <Spinner {...busy} />}
 
       {queue.map((q, i) => (
         <Text key={i} color="gray">
           {"  "}queued: {q.split("\n")[0].slice(0, 100)}
+          {i === queue.length - 1 ? "   (↑ to edit)" : ""}
         </Text>
       ))}
 
@@ -672,6 +671,13 @@ function App(props: Props) {
           cwd={cwd}
           placeholder={a.running ? "type to queue a message" : undefined}
           onSubmit={onSubmit}
+          onRecall={() => {
+            // Queued messages come back as one, to edit and send again.
+            if (!queue.length) return null;
+            const text = queue.join("\n");
+            setQueue([]);
+            return text;
+          }}
           onCtrlV={() => {
             const img = clipboardImage();
             if (!img) return null;
@@ -703,7 +709,8 @@ function App(props: Props) {
           </Text>
         </Box>
       </Box>
-    </>
+      </Box>
+    </Width.Provider>
   );
 }
 

@@ -53,6 +53,8 @@ export interface EditorProps {
   onExit?(): void;
   /** Esc with no popup open. */
   onEscape?(): void;
+  /** Up on the first line: text to take back into the input (queued messages), or null for history. */
+  onRecall?(): string | null;
   /** Keep typed text in the history file. */
   keepHistory?: boolean;
 }
@@ -171,6 +173,11 @@ export function Editor(p: EditorProps) {
           const prevStart = lineStart(ls - 1);
           return setCursor(Math.min(prevStart + (cursor - ls), ls - 1));
         }
+        const recalled = p.onRecall?.();
+        if (recalled) {
+          const v = value ? `${recalled}\n${value}` : recalled;
+          return set(v, v.length);
+        }
         if (histIdx + 1 < history.length) {
           if (histIdx === -1) setDraft(value);
           const h = history[histIdx + 1];
@@ -244,7 +251,12 @@ export function Editor(p: EditorProps) {
       }
       if (key.meta && (input === "b" || input === "f")) return setCursor(input === "b" ? wordLeft(cursor) : wordRight(cursor));
       if (input && !key.meta) {
-        const clean = input.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+        // Typed fast (or pasted without bracketed paste), text and Enter can
+        // arrive together: "\r" at the end submits, inside it is a newline.
+        const submitAfter = input.length > 1 && input.endsWith("\r") && !input.slice(0, -1).includes("\r");
+        const body = submitAfter ? input.slice(0, -1) : input;
+        const clean = body.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+        if (submitAfter) return submit(value.slice(0, cursor) + clean + value.slice(cursor));
         if (clean) insert(clean);
       }
     },
