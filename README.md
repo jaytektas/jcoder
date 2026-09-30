@@ -4,7 +4,7 @@ A coding agent for a local OpenAI-compatible LLM server (llama.cpp first).
 
 Built to make the most of a local model:
 
-- **Small prompt.** System prompt + tools is ~1.5k tokens.
+- **Small prompt.** System prompt + tools is ~2k tokens.
 - **Append-only history.** Nothing already sent is ever rewritten, so the
   server reuses its cache and a long session doesn't reprocess from scratch.
 - **Old thinking isn't sent back.** The model's reasoning is shown (or not)
@@ -35,9 +35,31 @@ for a new line · Up/Down for history · Ctrl+C twice or Ctrl+D quits.
 
 ## Tools
 
-`read_file` `write_file` `edit_file` `bash` `grep` `glob` `web_search`
-`web_fetch`. Web search goes through a SearXNG server (`searchUrl`);
-`web_fetch` returns a page's main text.
+| tool | |
+|---|---|
+| `read_file` `write_file` `edit_file` | files; `read_file` also shows images to the model |
+| `bash` | commands; `background: true` starts a job and returns at once |
+| `bash_output` `bash_stop` | read a background job's new output, stop it (jobs stop when jcoder exits) |
+| `grep` `glob` | search contents, find files |
+| `web_search` `web_fetch` | SearXNG search (`searchUrl`), a page's main text |
+| `todo` | the model's checklist for a multi-step task, shown above the input |
+| `ask_user` | the model asks you something, with options, mid-task |
+| `ask_model` | a second opinion from a remote model — only offered when `askModel.apiKey` is set |
+
+### Asking Gemini
+
+Get a free API key at https://aistudio.google.com/apikey and put it in the
+settings file (or set `GEMINI_API_KEY`):
+
+    "askModel": {
+      "name": "Gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "apiKey": "YOUR KEY",
+      "model": "gemini-3.8-flash"
+    }
+
+Any OpenAI-compatible API works the same way. The remote model sees only
+the question the local model writes, never the project or conversation.
 
 ## Images
 

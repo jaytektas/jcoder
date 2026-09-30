@@ -1,8 +1,9 @@
-import { chat, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall } from "./client.js";
+import { chat, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
 import type { Config } from "./config.js";
 import type { Image } from "./images.js";
 import { log, saveSession, storeContent, type Session } from "./session.js";
-import { SCHEMAS, TOOLS, type Approval, type ToolContext, type ToolResult } from "./tools.js";
+import { Jobs } from "./jobs.js";
+import { schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
 import { preview } from "./ui.js";
 import type { View } from "./view.js";
 
@@ -20,13 +21,19 @@ export class Agent {
   private abort?: AbortController;
   /** Consecutive identical tool calls, to catch loops. */
   private repeat = { key: "", result: "", count: 0 };
+  readonly jobs = new Jobs();
+  todos: Todo[] = [];
+  /** Fixed for the session: the tool list is part of the prompt the server caches. */
+  readonly tools: ToolSchema[];
 
   constructor(
     private cfg: Config,
     public session: Session,
     public contextWindow: number,
     private view: View,
-  ) {}
+  ) {
+    this.tools = schemas(cfg);
+  }
 
   get messages(): Message[] {
     return this.session.messages;
@@ -48,6 +55,13 @@ export class Agent {
       maxChars: this.cfg.maxToolChars,
       bashTimeout: this.cfg.bashTimeout,
       searchUrl: this.cfg.searchUrl,
+      jobs: this.jobs,
+      askModel: this.cfg.askModel,
+      ask: (q, options) => this.view.ask(q, options),
+      setTodos: (items) => {
+        this.todos = items;
+        this.view.todos(items);
+      },
       approve: (t, summary) => this.approve(t, summary),
       seen: this.seen,
     };
@@ -123,7 +137,7 @@ export class Agent {
       const reply = await chat(
         this.cfg,
         this.messages,
-        SCHEMAS,
+        this.tools,
         {
           onReasoning: (t) => {
             thinkTokens++;
@@ -245,7 +259,7 @@ export class Agent {
     const reply = await chat(
       this.cfg,
       [...this.messages, { role: "user", content: ask }],
-      SCHEMAS,
+      this.tools,
       { onContent: (t) => this.view.busy("Compacting", `${k((chars += t.length))} chars`) },
       signal,
       { thinking: false, toolChoice: "none" },
@@ -259,6 +273,10 @@ export class Agent {
       text += `\n\nThe user's latest request, word for word:\n${textOf(lastUser.content)}\n\nCarry on with it.`;
       if (Array.isArray(lastUser.content)) images = lastUser.content.filter((p) => p.type === "image_url");
     }
+    if (this.todos.length)
+      text += `\n\nYour to-do list:\n${this.todos.map((t) => `[${t.status === "done" ? "x" : t.status === "in_progress" ? ">" : " "}] ${t.text}`).join("\n")}`;
+    const running = this.jobs.list().filter((j) => !j.exit);
+    if (running.length) text += `\n\nBackground jobs still running:\n${running.map((j) => `${j.id}: ${j.command}`).join("\n")}`;
     const content: Content = images.length ? [{ type: "text", text }, ...images] : text;
     log(this.session, { type: "compact", tokensBefore: this.used, summary });
     this.session.messages = [this.messages[0], { role: "user", content }];
@@ -285,7 +303,7 @@ export class Agent {
   /** Estimate after loading a saved session; corrected by the first reply. */
   estimateUsed(): void {
     // ~3.5 characters a token; an image is at most --image-max-tokens (1024 here).
-    let chars = JSON.stringify(SCHEMAS).length;
+    let chars = JSON.stringify(this.tools).length;
     let images = 0;
     for (const m of this.messages) {
       chars += textOf(m.content).length;

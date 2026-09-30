@@ -2,8 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Content, ToolSchema } from "./client.js";
-import { HOME, type Mode } from "./config.js";
+import { HOME, type AskModel, type Mode } from "./config.js";
 import { isImagePath, kb, loadImage } from "./images.js";
+import type { Jobs } from "./jobs.js";
 import { webFetch, webSearch } from "./web.js";
 import { c } from "./ui.js";
 
@@ -13,6 +14,11 @@ export interface ToolResult {
   /** What the user sees, if different from a preview of content. */
   display?: string;
   error?: boolean;
+}
+
+export interface Todo {
+  text: string;
+  status: "pending" | "in_progress" | "done";
 }
 
 export interface Approval {
@@ -32,6 +38,11 @@ export interface ToolContext {
   bashTimeout: number;
   /** SearXNG server for web_search; empty = off. */
   searchUrl: string;
+  jobs: Jobs;
+  askModel: AskModel;
+  /** Puts a question to the user; null if they didn't answer. */
+  ask(question: string, options: string[]): Promise<string | null>;
+  setTodos(items: Todo[]): void;
   approve(tool: string, summary: string): Promise<Approval>;
   /** path -> mtime when the model last read or wrote it. */
   seen: Map<string, number>;
@@ -260,11 +271,12 @@ const bash: Tool = {
   schema: def(
     "bash",
     "Run a bash command in the project directory. Each call is a fresh shell: cd does not carry over. " +
-      "Output is stdout+stderr. Don't run interactive programs. For a server or anything long-running, " +
-      "start it in the background with its output redirected to a file (cmd > /tmp/x.log 2>&1 &); it keeps running after the call returns.",
+      "Output is stdout+stderr. Don't run interactive programs. For a server, watcher or anything that " +
+      "keeps running, set background: you get a job id at once; read its output with bash_output, stop it with bash_stop.",
     {
       command: str("The command"),
-      timeout: int("Seconds before it is killed (max 600)"),
+      timeout: int("Seconds before it is killed (max 600); not for background jobs"),
+      background: { type: "boolean", description: "Run it in the background and return straight away" },
     },
     ["command"],
   ),
@@ -275,6 +287,16 @@ const bash: Tool = {
     if (!cmd.trim()) return fail("command is empty.");
     const ok = await ctx.approve("bash", cmd);
     if (!ok.ok) return fail(`User declined.${ok.reason ? ` They said: ${ok.reason}` : ""}`);
+    if (a.background) {
+      const job = ctx.jobs.start(cmd, ctx.cwd);
+      // A second's output catches a command that fails straight away.
+      const first = await ctx.jobs.output(job.id, 1000, ctx.signal);
+      const out = first?.text.trim() ? `\n${cap(first.text.replace(/\s+$/, ""), ctx.maxChars)}` : "";
+      return {
+        content: `Started ${job.id} (${first?.status}).${out}\nRead more with bash_output ${job.id}; stop it with bash_stop ${job.id}.`,
+        display: `${job.id} ${first?.status}${out ? "\n" + out.trim().split("\n").slice(-4).join("\n") : ""}`,
+      };
+    }
     const timeout = Math.min(600, Math.max(1, Number(a.timeout) || ctx.bashTimeout)) * 1000;
     return new Promise((done) => {
       const child = spawn("bash", ["-c", cmd], {
@@ -316,6 +338,121 @@ const bash: Tool = {
       child.on("close", (code) => finish(code));
       child.on("error", (e) => done(fail(e.message)));
     });
+  },
+};
+
+const bashOutput: Tool = {
+  schema: def(
+    "bash_output",
+    "New output from a background job since you last read it, and whether it is still running.",
+    { id: str("Job id, e.g. job1"), wait: int("Seconds to wait for new output or for it to finish (default 0, max 120)") },
+    ["id"],
+  ),
+  writes: false,
+  summary: (a) => `${a.id}${a.wait ? ` (wait ${a.wait}s)` : ""}`,
+  async run(a, ctx) {
+    const wait = Math.min(120, Math.max(0, Number(a.wait) || 0)) * 1000;
+    const r = await ctx.jobs.output(String(a.id ?? ""), wait, ctx.signal);
+    if (!r) {
+      const ids = ctx.jobs.list().map((j) => `${j.id} (${ctx.jobs.status(j)}): ${j.command}`);
+      return fail(`No job ${a.id}.${ids.length ? ` Jobs:\n${ids.join("\n")}` : " There are no jobs."}`);
+    }
+    const body = r.text.trim() ? cap(r.text.replace(/\s+$/, ""), ctx.maxChars) : "(no new output)";
+    return { content: `${body}\n[${r.status}]`, display: `${r.status}${r.text.trim() ? `, ${r.text.trim().split("\n").length} new lines` : ", no new output"}` };
+  },
+};
+
+const bashStop: Tool = {
+  schema: def("bash_stop", "Stop a background job.", { id: str("Job id") }, ["id"]),
+  writes: false,
+  summary: (a) => String(a.id),
+  async run(a, ctx) {
+    return ctx.jobs.stop(String(a.id ?? "")) ? { content: `Stopped ${a.id}.` } : fail(`No job ${a.id}.`);
+  },
+};
+
+const todo: Tool = {
+  schema: def(
+    "todo",
+    "Your to-do list for a task with several steps; the user sees it. Send the whole list each time, " +
+      "marking one item in_progress while you work on it and items done as you finish them. Skip it for simple tasks.",
+    {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            status: { type: "string", enum: ["pending", "in_progress", "done"] },
+          },
+          required: ["text", "status"],
+        },
+      },
+    },
+    ["items"],
+  ),
+  writes: false,
+  summary: (a) => {
+    const items: Todo[] = Array.isArray(a.items) ? a.items : [];
+    return `${items.filter((i) => i.status === "done").length}/${items.length} done`;
+  },
+  async run(a, ctx) {
+    if (!Array.isArray(a.items)) return fail("items must be a list of {text, status}.");
+    const items: Todo[] = a.items
+      .filter((i: any) => i && typeof i.text === "string")
+      .map((i: any) => ({ text: i.text, status: ["pending", "in_progress", "done"].includes(i.status) ? i.status : "pending" }));
+    ctx.setTodos(items);
+    const mark = { pending: "[ ]", in_progress: "[>]", done: "[x]" };
+    return { content: "To-do list updated.", display: items.map((i) => `${mark[i.status]} ${i.text}`).join("\n") };
+  },
+};
+
+const askUser: Tool = {
+  schema: def(
+    "ask_user",
+    "Ask the user a question when you need their decision to go on. Offer options when there are clear choices; they can also type an answer.",
+    { question: str("The question"), options: { type: "array", items: { type: "string" }, description: "Choices, if any" } },
+    ["question"],
+  ),
+  writes: false,
+  summary: (a) => String(a.question),
+  async run(a, ctx) {
+    const options = Array.isArray(a.options) ? a.options.map(String).slice(0, 8) : [];
+    const answer = await ctx.ask(String(a.question ?? ""), options);
+    if (answer === null) return { content: "The user didn't answer. Decide yourself, and say what you assumed.", display: "no answer" };
+    return { content: `The user answered: ${answer}`, display: answer };
+  },
+};
+
+const askModel: Tool = {
+  schema: def(
+    "ask_model",
+    "Ask a stronger remote model for a second opinion: a hard bug, a design choice, an API you're unsure of. " +
+      "It sees nothing of this conversation or the project, only your question, so include the code, errors " +
+      "and context it needs. It can't run tools. Don't send secrets.",
+    { question: str("The question, with everything needed to answer it") },
+    ["question"],
+  ),
+  writes: false,
+  summary: (a) => String(a.question).replace(/\s+/g, " ").slice(0, 120),
+  async run(a, ctx) {
+    const m = ctx.askModel;
+    if (!m.apiKey) return fail("ask_model has no API key set.");
+    try {
+      const r = await fetch(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${m.apiKey}` },
+        body: JSON.stringify({ model: m.model, messages: [{ role: "user", content: String(a.question ?? "") }] }),
+        signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(180_000)]),
+      });
+      const text = await r.text();
+      if (!r.ok) return fail(`${m.name} returned HTTP ${r.status}: ${text.slice(0, 400)}`);
+      const answer = JSON.parse(text).choices?.[0]?.message?.content ?? "";
+      if (!answer) return fail(`${m.name} gave an empty answer.`);
+      return { content: cap(`${m.name} (${m.model}) says:\n\n${answer}`, ctx.maxChars), display: answer };
+    } catch (e: any) {
+      return fail(`Asking ${m.name} failed: ${e.cause?.message ?? e.message}`);
+    }
   },
 };
 
@@ -424,7 +561,10 @@ const fetchPage: Tool = {
 };
 
 export const TOOLS: Record<string, Tool> = Object.fromEntries(
-  [readFile, writeFile, editFile, bash, grep, glob, search, fetchPage].map((t) => [t.schema.function.name, t]),
+  [readFile, writeFile, editFile, bash, bashOutput, bashStop, grep, glob, search, fetchPage, todo, askUser, askModel].map((t) => [
+    t.schema.function.name,
+    t,
+  ]),
 );
 
 /**
@@ -432,4 +572,12 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
  * and changing it would throw away the server's cache. Read-only mode refuses
  * writing tools when they're called instead.
  */
-export const SCHEMAS: ToolSchema[] = Object.values(TOOLS).map((t) => t.schema);
+export function schemas(opts: { askModel: AskModel }): ToolSchema[] {
+  return Object.values(TOOLS)
+    .filter((t) => t.schema.function.name !== "ask_model" || opts.askModel.apiKey)
+    .map((t) =>
+      t.schema.function.name === "ask_model"
+        ? { ...t.schema, function: { ...t.schema.function, description: `Ask ${opts.askModel.name} (${opts.askModel.model}). ${t.schema.function.description}` } }
+        : t.schema,
+    );
+}

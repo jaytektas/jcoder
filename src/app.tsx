@@ -13,7 +13,7 @@ import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown } from "./markdown.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
 import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
-import type { Approval } from "./tools.js";
+import type { Approval, Todo } from "./tools.js";
 import type { View } from "./view.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
@@ -58,6 +58,13 @@ interface Pick {
   title: string;
   options: string[];
   resolve(i: number | null): void;
+}
+
+interface Question {
+  question: string;
+  options: string[];
+  typing: boolean;
+  resolve(answer: string | null): void;
 }
 
 interface Ask {
@@ -179,6 +186,8 @@ function App(props: Props) {
   const [busy, setBusy] = useState<{ label: string; detail: string; since: number } | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
   const [, setTick] = useState(0);
@@ -204,6 +213,8 @@ function App(props: Props) {
     replyStarted: false,
     thoughtStarted: false,
     inCode: false,
+    /** Blank lines held back until more text follows, so a reply never ends in them. */
+    blanks: 0,
     pasted: [] as Image[],
   });
 
@@ -229,9 +240,14 @@ function App(props: Props) {
     if (!st.replyStarted) done = done.replace(/^\s+/, "");
     if (all) done = done.replace(/\s+$/, "");
     if (!done && (!st.replyStarted || all)) return;
+    if (!done) {
+      st.blanks++;
+      return;
+    }
     const [rendered, inCode] = renderLines(done, st.inCode);
     st.inCode = inCode;
-    push(<Reply text={rendered} first={!st.replyStarted} />);
+    push(<Reply text={"\n".repeat(st.blanks) + rendered} first={!st.replyStarted} />);
+    st.blanks = 0;
     st.replyStarted = true;
   };
 
@@ -260,6 +276,7 @@ function App(props: Props) {
       flushText(true);
       st.text = st.thought = "";
       st.replyStarted = st.thoughtStarted = st.inCode = false;
+      st.blanks = 0;
       setLive("");
       setLiveThought("");
     },
@@ -281,6 +298,12 @@ function App(props: Props) {
     notice,
     approve(tool, summary) {
       return new Promise((resolve) => setAsk({ tool, summary, typing: false, resolve }));
+    },
+    ask(q, options) {
+      return new Promise((resolve) => setQuestion({ question: q, options, typing: options.length === 0, resolve }));
+    },
+    todos(items) {
+      setTodos(items);
     },
     turnDone({ seconds, status, stopped }) {
       setBusy(null);
@@ -310,6 +333,7 @@ function App(props: Props) {
   const cwd = agent.session.cwd;
 
   const newAgent = (session: Session, resumed: boolean) => {
+    setTodos([]);
     agentRef.current = new Agent(cfg, session, ctxWindow, stableView);
     if (resumed) agentRef.current.estimateUsed();
     rerender();
@@ -516,7 +540,7 @@ function App(props: Props) {
 
   // App-wide keys. The editor handles typing.
   useInput((input, key) => {
-    if (key.escape && agentRef.current.running && !ask && !pick) agentRef.current.stop();
+    if (key.escape && agentRef.current.running && !ask && !pick && !question) agentRef.current.stop();
     else if (key.tab && key.shift) setMode(MODES[(MODES.indexOf(cfg.mode) + 1) % MODES.length]);
     else if (key.ctrl && input === "t") {
       cfg.showThinking = !cfg.showThinking;
@@ -535,7 +559,9 @@ function App(props: Props) {
   };
   const [modeColor, modeText] = MODE_LABEL[cfg.mode];
   const a = agentRef.current;
-  const editorActive = !pick && !ask;
+  const editorActive = !pick && !ask && !question;
+  const openTodos = todos.some((t) => t.status !== "done") ? todos : [];
+  const runningJobs = a.jobs.list().filter((j) => !j.exit).length;
 
   return (
     <>
@@ -596,6 +622,50 @@ function App(props: Props) {
         </Box>
       )}
 
+      {question && !question.typing && (
+        <Picker
+          title={question.question}
+          options={[...question.options, "Type an answer"]}
+          onPick={(i) => {
+            if (i === question.options.length) return setQuestion({ ...question, typing: true });
+            const q = question;
+            setQuestion(null);
+            q.resolve(i === null ? null : q.options[i]);
+          }}
+        />
+      )}
+      {question && question.typing && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="yellow">{question.question}</Text>
+          <Editor
+            active
+            cwd={cwd}
+            keepHistory={false}
+            onSubmit={(t) => {
+              const q = question;
+              setQuestion(null);
+              q.resolve(t.trim() || null);
+            }}
+            onEscape={() => {
+              const q = question;
+              setQuestion(null);
+              q.resolve(null);
+            }}
+          />
+        </Box>
+      )}
+
+      {openTodos.length > 0 && (
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {openTodos.map((t, i) => (
+            <Text key={i} color={t.status === "done" ? "gray" : t.status === "in_progress" ? "cyan" : undefined} strikethrough={t.status === "done"}>
+              {t.status === "done" ? "☒ " : t.status === "in_progress" ? "▸ " : "☐ "}
+              {t.text}
+            </Text>
+          ))}
+        </Box>
+      )}
+
       <Box flexDirection="column" display={editorActive ? "flex" : "none"}>
         <Editor
           active={editorActive}
@@ -623,6 +693,7 @@ function App(props: Props) {
               <>
                 <Text color={modeColor}>{modeText}</Text>
                 <Text color="gray"> (shift+tab)</Text>
+                {runningJobs > 0 && <Text color="blue"> · {runningJobs} background job{runningJobs > 1 ? "s" : ""}</Text>}
               </>
             )}
           </Text>

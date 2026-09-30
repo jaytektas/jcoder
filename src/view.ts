@@ -1,4 +1,4 @@
-import type { Approval } from "./tools.js";
+import type { Approval, Todo } from "./tools.js";
 import { c, indent, preview, write } from "./ui.js";
 
 /** What the agent reports while it works. The Ink app and plain output both implement it. */
@@ -15,6 +15,9 @@ export interface View {
   result(display: string, error: boolean): void;
   notice(text: string, tone?: "info" | "warn" | "error"): void;
   approve(tool: string, summary: string): Promise<Approval>;
+  /** ask_user: the answer, or null if none. */
+  ask(question: string, options: string[]): Promise<string | null>;
+  todos(items: Todo[]): void;
   turnDone(info: { seconds: number; status: string; stopped: boolean }): void;
 }
 
@@ -58,6 +61,12 @@ export class PlainView implements View {
   async approve(): Promise<Approval> {
     return { ok: false, reason: "not allowed without asking, and -p can't ask; run with --mode auto" };
   }
+
+  async ask(): Promise<string | null> {
+    return null;
+  }
+
+  todos() {}
 
   turnDone(info: { seconds: number; status: string; stopped: boolean }) {
     if (info.stopped) write(c.yellow("[stopped]\n"));

@@ -4,6 +4,16 @@ import path from "node:path";
 
 export type Mode = "ro" | "edit" | "auto";
 
+/** A remote model the local one can ask for a second opinion (ask_model). */
+export interface AskModel {
+  name: string;
+  /** OpenAI-compatible API root; chat/completions is added. */
+  baseUrl: string;
+  /** Empty = the tool is off. GEMINI_API_KEY in the environment works too. */
+  apiKey: string;
+  model: string;
+}
+
 export interface Config {
   /** OpenAI-compatible server root, without /v1. */
   baseUrl: string;
@@ -21,6 +31,7 @@ export interface Config {
   maxToolChars: number;
   /** SearXNG server for the web_search tool; empty turns it off. */
   searchUrl: string;
+  askModel: AskModel;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
@@ -43,6 +54,12 @@ const DEFAULTS: Config = {
   maxToolChars: 24000,
   bashTimeout: 120,
   searchUrl: "http://127.0.0.1:8888",
+  askModel: {
+    name: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKey: "",
+    model: "gemini-3.8-flash",
+  },
   compactAt: 0.85,
   extraBody: {},
 };
@@ -61,7 +78,8 @@ export function loadConfig(): Config {
     if (e.code !== "ENOENT") throw new Error(`${CONFIG_PATH}: ${e.message}`);
     exists = false;
   }
-  const cfg = { ...DEFAULTS, ...file };
+  const cfg = { ...DEFAULTS, ...file, askModel: { ...DEFAULTS.askModel, ...file.askModel } };
+  if (!cfg.askModel.apiKey && process.env.GEMINI_API_KEY) cfg.askModel.apiKey = process.env.GEMINI_API_KEY;
   if (!exists || Object.keys(DEFAULTS).some((k) => !(k in file))) {
     try {
       fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
