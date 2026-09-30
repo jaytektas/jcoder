@@ -28,7 +28,32 @@ export interface AdvisorSetting {
   model?: string;
   /** Seconds to wait for this one's answer; default the advisorTimeout setting. */
   timeout?: number;
+  /** Left out (dropAdvisors "permanent" sets this). */
+  disabled?: boolean;
+  /** Left out until this time, ISO 8601 (dropAdvisors "day", "week", ... set this). */
+  disabledUntil?: string;
 }
+
+/**
+ * What to do with an advisor that stops answering: keep trying, skip it
+ * until jcoder restarts, skip it for a period (saved in the settings as
+ * disabledUntil), or turn it off in the settings for good.
+ */
+export type DropPolicy = "never" | "session" | "day" | "week" | "month" | "year" | "permanent";
+export const DROP_DAYS: Partial<Record<DropPolicy, number>> = { day: 1, week: 7, month: 30, year: 365 };
+
+/** Why a settings entry isn't in use right now, or null if it is. */
+export function inactive(s: AdvisorSetting): string | null {
+  if (s.disabled) return "turned off";
+  if (s.disabledUntil && Date.parse(s.disabledUntil) > Date.now()) return `off until ${new Date(s.disabledUntil).toLocaleString()}`;
+  return null;
+}
+
+/** Advisors dropped for this run of jcoder, shared by the main agent and its sub-agents. */
+export const dropped = new Set<string>();
+/** Busy or rate-limited failures in a row, per advisor. */
+const busyStreak = new Map<string, number>();
+const BUSY_LIMIT = 3;
 
 interface Preset {
   name: string;
@@ -101,6 +126,7 @@ export function resolveAdvisors(settings: AdvisorSetting[], timeoutSecs: number)
   for (const s of settings) {
     const p = s.preset ? PRESETS[s.preset.toLowerCase()] : undefined;
     if (s.preset) used.add(s.preset.toLowerCase());
+    if (inactive(s)) continue;
     const a: Advisor = {
       name: s.name ?? p?.name ?? s.preset ?? "advisor",
       baseUrl: (s.baseUrl ?? p?.baseUrl ?? "").replace(/\/+$/, ""),
@@ -122,6 +148,8 @@ export type Answer = { ok: true; text: string; advisor: Advisor; notes: string[]
 
 /** Worth trying again or trying elsewhere: busy, rate-limited, down, or unreachable. */
 const transient = (status: number) => status === 429 || status >= 500;
+/** Busy or rate-limited: normal on a free tier, only held against it when it keeps happening. */
+const busy = (status: number) => status === 429 || status === 503;
 
 async function askOne(a: Advisor, question: string, signal: AbortSignal, timeoutMs: number): Promise<{ text?: string; status: number; why?: string }> {
   try {
@@ -154,11 +182,22 @@ export async function ask(
   signal: AbortSignal,
   /** once: one try each, no second round, at most this many ms (for a quick test). */
   once?: { maxMs: number },
+  /** Called when an advisor has ignored us enough to drop, per the dropAdvisors setting. */
+  onDrop?: (a: Advisor, why: string) => void,
 ): Promise<Answer> {
   const failed = new Map<string, string>(); // name -> latest reason
   const notes = () => [...failed].map(([name, why]) => `${name}: ${why}`);
   const first = advisors.find((a) => a.name.toLowerCase() === preferred?.toLowerCase());
-  let todo = first ? [first, ...advisors.filter((a) => a !== first)] : advisors;
+  let todo = (first ? [first, ...advisors.filter((a) => a !== first)] : advisors).filter((a) => once || !dropped.has(a.name));
+  if (!todo.length) return { ok: false, notes: ["every advisor has been dropped for not answering; /advisors tests them again"] };
+  const judge = (a: Advisor, status: number, why: string) => {
+    if (!onDrop) return;
+    if (busy(status)) {
+      const n = (busyStreak.get(a.name) ?? 0) + 1;
+      busyStreak.set(a.name, n);
+      if (n >= BUSY_LIMIT) onDrop(a, `busy or rate-limited ${n} times in a row`);
+    } else if (status === 0 || status === 401 || status === 403 || status === 404) onDrop(a, why);
+  };
   const pauses = once ? [0] : [0, ...(todo.length === 1 ? [3000, 8000] : [5000])];
   for (const pause of pauses) {
     if (pause) await new Promise((res) => setTimeout(res, pause));
@@ -168,9 +207,13 @@ export async function ask(
       const r = await askOne(a, question, signal, once ? Math.min(once.maxMs, a.timeoutMs) : a.timeoutMs);
       if (r.text) {
         failed.delete(a.name);
+        busyStreak.delete(a.name);
+        dropped.delete(a.name);
         return { ok: true, text: r.text, advisor: a, notes: notes() };
       }
       failed.set(a.name, r.why ?? "no answer");
+      judge(a, r.status, r.why ?? "no answer");
+      if (dropped.has(a.name)) continue;
       if (r.status === 0 || transient(r.status)) again.push(a);
     }
     if (!again.length) break;

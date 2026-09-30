@@ -6,6 +6,10 @@
   Gemini, Groq, Cerebras, OpenRouter, NVIDIA and Claude: add a key and go.
   When one is busy, rate-limited or down, the next answers. `/advisors`
   tests them; `advisorTimeout` sets how long to wait. Replaces `askModel`.
+- An advisor that ignores us (no answer, unreachable, bad key, or busy three
+  times running) is dropped for the session, a day, week, month, year or for
+  good, per `dropAdvisors`; timed and permanent drops are saved in the
+  settings.
 
 ## 0.2.0
 

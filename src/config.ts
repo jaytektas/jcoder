@@ -20,7 +20,7 @@ export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "max"];
 /** Thinking tokens allowed per reply; -1 = no limit. */
 export const EFFORT_BUDGET: Record<Effort, number> = { off: 0, low: 512, medium: 2048, high: 8192, max: -1 };
 
-import type { AdvisorSetting } from "./advisors.js";
+import type { AdvisorSetting, DropPolicy } from "./advisors.js";
 
 export interface Config {
   /** OpenAI-compatible server root, without /v1. */
@@ -43,6 +43,8 @@ export interface Config {
   advisors: AdvisorSetting[];
   /** Seconds to wait for an advisor's answer before trying the next (each can set its own "timeout"). */
   advisorTimeout: number;
+  /** An advisor that stops answering (timeout, unreachable, bad key, or busy 3 times running): keep trying ("never"); skip it until restart ("session"); for a "day", "week", "month" or "year" (sets its disabledUntil here); or for good ("permanent", sets its disabled here). */
+  dropAdvisors: DropPolicy;
   /** Look for new releases on GitHub (at most once a day) and offer to install them. */
   checkUpdates: boolean;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
@@ -70,6 +72,7 @@ const DEFAULTS: Config = {
   checkUpdates: true,
   advisors: [],
   advisorTimeout: 90,
+  dropAdvisors: "session",
   compactAt: 0.85,
   extraBody: {},
 };

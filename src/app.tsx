@@ -25,7 +25,7 @@ import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } fr
 import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
 import { LOGO_WIDTH, logo } from "./logo.js";
-import { ask as askAdvisors, PRESETS } from "./advisors.js";
+import { ask as askAdvisors, dropped, inactive, PRESETS } from "./advisors.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { AgentStatus, View } from "./view.js";
 
@@ -627,6 +627,10 @@ function App(props: Props) {
         break;
       case "advisors": {
         const list = a.advisors;
+        for (const s of cfg.advisors) {
+          const off = inactive(s);
+          if (off) notice(`– ${s.name ?? (s.preset ? PRESETS[s.preset]?.name : "") ?? "advisor"} · ${off} (in the settings)`);
+        }
         if (!list.length) {
           notice(
             `No advisors set up. Add one to "advisors" in the settings, e.g. {"preset": "groq", "apiKey": "…"}. Presets: ${Object.keys(PRESETS).join(", ")}.`,
@@ -640,7 +644,8 @@ function App(props: Props) {
             const t0 = Date.now();
             const r = await askAdvisors([adv], "Reply with just: OK", undefined, new AbortController().signal, { maxMs: 30_000 });
             const secs = ((Date.now() - t0) / 1000).toFixed(1);
-            notice(`${r.ok ? "✓" : "✗"} ${adv.name} · ${adv.model} · ${r.ok ? `answered in ${secs}s` : r.notes.join("; ")}`, r.ok ? "info" : "error");
+            const was = dropped.has(adv.name) && r.ok ? " (was dropped; asking it again)" : dropped.has(adv.name) ? " (dropped this session)" : "";
+            notice(`${r.ok ? "✓" : "✗"} ${adv.name} · ${adv.model} · ${r.ok ? `answered in ${secs}s` : r.notes.join("; ")}${was}`, r.ok ? "info" : "error");
           }),
         );
         break;

@@ -184,7 +184,13 @@ moving to the next when one is busy, rate-limited or down:
 
 A key in the environment adds that preset on its own. `"model"` overrides a
 preset's model; `"timeout"` (seconds) overrides `advisorTimeout` for one
-advisor. `/advisors` tests each one. Advisors see only the question the model
+advisor. `/advisors` tests each one.
+
+An advisor that stops answering (no answer in time, unreachable, a bad key,
+or busy three times running) is dropped as `dropAdvisors` says: `"never"`,
+`"session"` (the default: until jcoder restarts), `"day"`, `"week"`,
+`"month"`, `"year"` (written to its entry as `disabledUntil`), or
+`"permanent"` (written as `"disabled": true`). Delete those to bring it back. Advisors see only the question the model
 writes, never your project; free tiers may keep what you send, so keep
 secrets out.
 
@@ -222,6 +228,7 @@ setting and its default on first run, so everything you can change is in it.
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
 | `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |
 | `advisorTimeout` | 90 | seconds to wait for an advisor before trying the next |
+| `dropAdvisors` | `session` | an advisor that ignores us: `never`, `session`, `day`, `week`, `month`, `year`, `permanent` |
 | `checkUpdates` | true | offer new releases once a day |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
 | `extraBody` | `{}` | merged into every request, e.g. sampling parameters |

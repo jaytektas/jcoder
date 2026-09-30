@@ -9,9 +9,9 @@
 // file for details.
 
 import { chat, serverSlots, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
-import type { Config } from "./config.js";
+import { saveSettings, type Config } from "./config.js";
 import type { Image } from "./images.js";
-import { resolveAdvisors, type Advisor } from "./advisors.js";
+import { DROP_DAYS, dropped, PRESETS, resolveAdvisors, type Advisor } from "./advisors.js";
 import { agentPrompt } from "./prompt.js";
 import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
@@ -163,6 +163,7 @@ export class Agent {
       searchUrl: this.cfg.searchUrl,
       jobs: this.jobs,
       advisors: this.advisors,
+      dropAdvisor: this.cfg.dropAdvisors === "never" ? undefined : (a, why) => this.dropAdvisor(a, why),
       ask: (q, options) => this.view.ask(q, options),
       setTodos: (items) => {
         this.todos = items;
@@ -172,6 +173,36 @@ export class Agent {
       seen: this.seen,
       runAgent: this.sub ? undefined : (description, task) => this.runAgent(description, task, signal),
     };
+  }
+
+  /** Stops asking an advisor that ignores us: until restart, or for good in the settings. */
+  private dropAdvisor(a: Advisor, why: string) {
+    if (dropped.has(a.name)) return;
+    dropped.add(a.name);
+    const policy = this.cfg.dropAdvisors;
+    const days = DROP_DAYS[policy];
+    if (policy !== "permanent" && !days) {
+      this.view.notice(`Not asking ${a.name} again this session (${why}).`, "warn");
+      return;
+    }
+    // Saved in the settings, on its entry: a preset entry, a named one, or a
+    // new entry for a preset that came from the environment.
+    const mark = days ? { disabledUntil: new Date(Date.now() + days * 86_400_000).toISOString() } : { disabled: true };
+    const list = [...this.cfg.advisors];
+    const at = list.findIndex((s) => (s.name ?? (s.preset ? PRESETS[s.preset.toLowerCase()]?.name : "") ?? "").toLowerCase() === a.name.toLowerCase());
+    if (at >= 0) list[at] = { ...list[at], ...mark };
+    else {
+      const preset = Object.entries(PRESETS).find(([, p]) => p.name === a.name)?.[0];
+      list.push(preset ? { preset, ...mark } : { name: a.name, baseUrl: a.baseUrl, model: a.model, ...mark });
+    }
+    this.cfg.advisors = list;
+    saveSettings({ advisors: list });
+    this.view.notice(
+      days
+        ? `Not asking ${a.name} until ${new Date(mark.disabledUntil!).toLocaleString()} (${why}); its disabledUntil in the settings.`
+        : `Advisor ${a.name} turned off in the settings (${why}). Remove its "disabled" to bring it back.`,
+      "warn",
+    );
   }
 
   /** A sub-agent with a fresh context does `task` and reports back. */

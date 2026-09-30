@@ -52,6 +52,8 @@ export interface ToolContext {
   jobs: Jobs;
   /** Remote models for ask_model, in order. */
   advisors: Advisor[];
+  /** An advisor ignored us enough to drop (per the dropAdvisors setting); undefined when the setting is "never". */
+  dropAdvisor?: (a: Advisor, why: string) => void;
   /** Puts a question to the user; null if they didn't answer. */
   ask(question: string, options: string[]): Promise<string | null>;
   setTodos(items: Todo[]): void;
@@ -454,7 +456,7 @@ const askModel: Tool = {
   summary: (a) => `${a.advisor ? `${a.advisor}: ` : ""}${String(a.question).replace(/\s+/g, " ").slice(0, 120)}`,
   async run(a, ctx) {
     if (!ctx.advisors.length) return fail("No advisors are set up.");
-    const r = await askAdvisors(ctx.advisors, String(a.question ?? ""), a.advisor ? String(a.advisor) : undefined, ctx.signal);
+    const r = await askAdvisors(ctx.advisors, String(a.question ?? ""), a.advisor ? String(a.advisor) : undefined, ctx.signal, undefined, ctx.dropAdvisor);
     if (!r.ok) return fail(`No advisor answered:\n${r.notes.join("\n")}`);
     const tried = r.notes.length ? ` (after ${r.notes.map((n) => n.split(":")[0]).join(", ")} didn't answer)` : "";
     return {
