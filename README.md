@@ -123,6 +123,7 @@ model gets your reason.
 | `/ctx` | context used |
 | `/prompt [edit]` | show the system prompt; `edit` makes a copy to change |
 | `/log` | where this conversation's full log is |
+| `/advisors` | test each advisor `ask_model` can use |
 | `/update` | check for a new release now |
 | `/help` | everything above |
 
@@ -140,7 +141,7 @@ From a script: `jcoder -p "fix the failing test"` runs one request and exits.
 | `web_search` `web_fetch` | search the web through [SearXNG](https://github.com/searxng/searxng) (once `searchUrl` is set), read a page |
 | `todo` | the model's checklist for a bigger job, shown above the input |
 | `ask_user` | the model asks you a question, with choices, mid-task |
-| `ask_model` | a second opinion from a stronger remote model (only once you set a key) |
+| `ask_model` | a second opinion from a stronger remote model (once an advisor is set up) |
 | `agent` | hand a self-contained job to a sub-agent with a fresh context |
 
 **Agents.** For a big search or an independent piece of work, the model can
@@ -159,10 +160,33 @@ slots that share one KV cache, so any slot can use the whole context:
 llama-server -m your-model.gguf -ngl 99 -fa on -c 163840 -np 5 --kv-unified --port 8080
 ```
 
-**Asking Gemini.** Put a free key from https://aistudio.google.com/apikey
-in the settings (or `GEMINI_API_KEY`) and the model can ask Gemini when it's
-stuck. Gemini sees only the question the model writes, never your project.
-Any OpenAI-compatible API works the same way.
+**Advisors.** `ask_model` lets the local model ask a stronger remote model
+when it's stuck. Several providers give free, rate-limited API keys; add
+one or more to `"advisors"` in the settings and jcoder uses them in order,
+moving to the next when one is busy, rate-limited or down:
+
+```json
+"advisors": [
+  { "preset": "gemini", "apiKey": "…" },
+  { "preset": "groq", "apiKey": "…" },
+  { "name": "Mine", "baseUrl": "https://host/v1", "apiKey": "…", "model": "some-model" }
+]
+```
+
+| preset | model | key from | env var |
+|---|---|---|---|
+| `gemini` | gemini-3.8-flash | https://aistudio.google.com/apikey | `GEMINI_API_KEY` |
+| `groq` | openai/gpt-oss-120b | https://console.groq.com/keys | `GROQ_API_KEY` |
+| `cerebras` | gpt-oss-120b | https://cloud.cerebras.ai | `CEREBRAS_API_KEY` |
+| `openrouter` | openrouter/free (a free model) | https://openrouter.ai/keys | `OPENROUTER_API_KEY` |
+| `nvidia` | moonshotai/kimi-k3 | https://build.nvidia.com | `NVIDIA_API_KEY` |
+| `anthropic` | claude-opus-5-5 (paid) | https://platform.claude.com | `ANTHROPIC_API_KEY` |
+
+A key in the environment adds that preset on its own. `"model"` overrides a
+preset's model; `"timeout"` (seconds) overrides `advisorTimeout` for one
+advisor. `/advisors` tests each one. Advisors see only the question the model
+writes, never your project; free tiers may keep what you send, so keep
+secrets out.
 
 ## Effort
 
@@ -196,7 +220,8 @@ setting and its default on first run, so everything you can change is in it.
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
-| `askModel` | Gemini, no key | the remote model for `ask_model`: `name`, `baseUrl`, `apiKey`, `model` |
+| `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |
+| `advisorTimeout` | 90 | seconds to wait for an advisor before trying the next |
 | `checkUpdates` | true | offer new releases once a day |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
 | `extraBody` | `{}` | merged into every request, e.g. sampling parameters |

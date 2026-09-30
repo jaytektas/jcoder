@@ -12,7 +12,8 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Content, ToolSchema } from "./client.js";
-import { HOME, type AskModel, type Mode } from "./config.js";
+import { ask as askAdvisors, type Advisor } from "./advisors.js";
+import { HOME, type Mode } from "./config.js";
 import { isImagePath, kb, loadImage } from "./images.js";
 import type { Jobs } from "./jobs.js";
 import { webFetch, webSearch } from "./web.js";
@@ -49,7 +50,8 @@ export interface ToolContext {
   /** SearXNG server for web_search; empty = off. */
   searchUrl: string;
   jobs: Jobs;
-  askModel: AskModel;
+  /** Remote models for ask_model, in order. */
+  advisors: Advisor[];
   /** Puts a question to the user; null if they didn't answer. */
   ask(question: string, options: string[]): Promise<string | null>;
   setTodos(items: Todo[]): void;
@@ -441,39 +443,24 @@ const askModel: Tool = {
     "ask_model",
     "Ask a stronger remote model for a second opinion: a hard bug, a design choice, an API you're unsure of. " +
       "It sees nothing of this conversation or the project, only your question, so include the code, errors " +
-      "and context it needs. It can't run tools. Don't send secrets.",
-    { question: str("The question, with everything needed to answer it") },
+      "and context it needs. It can't run tools. Don't send secrets. If the one asked is busy, the next answers.",
+    {
+      question: str("The question, with everything needed to answer it"),
+      advisor: str("Which to ask first (default: the first listed)"),
+    },
     ["question"],
   ),
   writes: false,
-  summary: (a) => String(a.question).replace(/\s+/g, " ").slice(0, 120),
+  summary: (a) => `${a.advisor ? `${a.advisor}: ` : ""}${String(a.question).replace(/\s+/g, " ").slice(0, 120)}`,
   async run(a, ctx) {
-    const m = ctx.askModel;
-    if (!m.apiKey) return fail("ask_model has no API key set.");
-    try {
-      const send = () =>
-        fetch(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${m.apiKey}` },
-          body: JSON.stringify({ model: m.model, messages: [{ role: "user", content: String(a.question ?? "") }] }),
-          signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(180_000)]),
-        });
-      // Busy (503) or rate-limited (429) is usually a moment's thing, on free keys especially.
-      let r = await send();
-      for (const wait of [3000, 8000]) {
-        if (r.status !== 503 && r.status !== 429) break;
-        await new Promise((res) => setTimeout(res, wait));
-        if (ctx.signal.aborted) return fail("Interrupted.");
-        r = await send();
-      }
-      const text = await r.text();
-      if (!r.ok) return fail(`${m.name} returned HTTP ${r.status}: ${text.slice(0, 400)}`);
-      const answer = JSON.parse(text).choices?.[0]?.message?.content ?? "";
-      if (!answer) return fail(`${m.name} gave an empty answer.`);
-      return { content: cap(`${m.name} (${m.model}) says:\n\n${answer}`, ctx.maxChars), display: answer };
-    } catch (e: any) {
-      return fail(`Asking ${m.name} failed: ${e.cause?.message ?? e.message}`);
-    }
+    if (!ctx.advisors.length) return fail("No advisors are set up.");
+    const r = await askAdvisors(ctx.advisors, String(a.question ?? ""), a.advisor ? String(a.advisor) : undefined, ctx.signal);
+    if (!r.ok) return fail(`No advisor answered:\n${r.notes.join("\n")}`);
+    const tried = r.notes.length ? ` (after ${r.notes.map((n) => n.split(":")[0]).join(", ")} didn't answer)` : "";
+    return {
+      content: cap(`${r.advisor.name} (${r.advisor.model}) says${tried}:\n\n${r.text}`, ctx.maxChars),
+      display: `${r.advisor.name}${tried}\n${r.text}`,
+    };
   },
 };
 
@@ -620,15 +607,16 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
 /** Tools a sub-agent doesn't get: it can't start agents, ask the user, or own the to-do list. */
 const MAIN_ONLY = new Set(["agent", "ask_user", "todo"]);
 
-export function schemas(opts: { askModel: AskModel; searchUrl: string }, sub = false): ToolSchema[] {
+export function schemas(opts: { advisors: Advisor[]; searchUrl: string }, sub = false): ToolSchema[] {
   // Tools that need setting up are only offered once they are.
+  const names = opts.advisors.map((a) => `${a.name} (${a.model})`).join(", ");
   return Object.values(TOOLS)
     .filter((t) => !sub || !MAIN_ONLY.has(t.schema.function.name))
-    .filter((t) => t.schema.function.name !== "ask_model" || opts.askModel.apiKey)
+    .filter((t) => t.schema.function.name !== "ask_model" || opts.advisors.length)
     .filter((t) => t.schema.function.name !== "web_search" || opts.searchUrl)
     .map((t) =>
       t.schema.function.name === "ask_model"
-        ? { ...t.schema, function: { ...t.schema.function, description: `Ask ${opts.askModel.name} (${opts.askModel.model}). ${t.schema.function.description}` } }
+        ? { ...t.schema, function: { ...t.schema.function, description: `Advisors: ${names}. ${t.schema.function.description}` } }
         : t.schema,
     );
 }

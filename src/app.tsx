@@ -25,6 +25,7 @@ import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } fr
 import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
 import { LOGO_WIDTH, logo } from "./logo.js";
+import { ask as askAdvisors, PRESETS } from "./advisors.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { AgentStatus, View } from "./view.js";
 
@@ -624,6 +625,26 @@ function App(props: Props) {
       case "ctx":
         notice(a.status());
         break;
+      case "advisors": {
+        const list = a.advisors;
+        if (!list.length) {
+          notice(
+            `No advisors set up. Add one to "advisors" in the settings, e.g. {"preset": "groq", "apiKey": "…"}. Presets: ${Object.keys(PRESETS).join(", ")}.`,
+          );
+          break;
+        }
+        notice(`Testing ${list.length} advisor${list.length > 1 ? "s" : ""} (one try each, up to 30s)…`);
+        // Each result as it comes, so one slow provider doesn't hide the rest.
+        await Promise.all(
+          list.map(async (adv) => {
+            const t0 = Date.now();
+            const r = await askAdvisors([adv], "Reply with just: OK", undefined, new AbortController().signal, { maxMs: 30_000 });
+            const secs = ((Date.now() - t0) / 1000).toFixed(1);
+            notice(`${r.ok ? "✓" : "✗"} ${adv.name} · ${adv.model} · ${r.ok ? `answered in ${secs}s` : r.notes.join("; ")}`, r.ok ? "info" : "error");
+          }),
+        );
+        break;
+      }
       case "update":
         await update(true);
         break;

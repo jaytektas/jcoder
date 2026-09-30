@@ -20,15 +20,7 @@ export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "max"];
 /** Thinking tokens allowed per reply; -1 = no limit. */
 export const EFFORT_BUDGET: Record<Effort, number> = { off: 0, low: 512, medium: 2048, high: 8192, max: -1 };
 
-/** A remote model the local one can ask for a second opinion (ask_model). */
-export interface AskModel {
-  name: string;
-  /** OpenAI-compatible API root; chat/completions is added. */
-  baseUrl: string;
-  /** Empty = the tool is off. GEMINI_API_KEY in the environment works too. */
-  apiKey: string;
-  model: string;
-}
+import type { AdvisorSetting } from "./advisors.js";
 
 export interface Config {
   /** OpenAI-compatible server root, without /v1. */
@@ -47,7 +39,10 @@ export interface Config {
   maxToolChars: number;
   /** SearXNG server for the web_search tool; empty turns it off. */
   searchUrl: string;
-  askModel: AskModel;
+  /** Remote models for ask_model: {preset, apiKey} or {name, baseUrl, apiKey, model}. See advisors.ts. */
+  advisors: AdvisorSetting[];
+  /** Seconds to wait for an advisor's answer before trying the next (each can set its own "timeout"). */
+  advisorTimeout: number;
   /** Look for new releases on GitHub (at most once a day) and offer to install them. */
   checkUpdates: boolean;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
@@ -73,12 +68,8 @@ const DEFAULTS: Config = {
   bashTimeout: 120,
   searchUrl: "",
   checkUpdates: true,
-  askModel: {
-    name: "Gemini",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    apiKey: "",
-    model: "gemini-3.8-flash",
-  },
+  advisors: [],
+  advisorTimeout: 90,
   compactAt: 0.85,
   extraBody: {},
 };
@@ -97,8 +88,7 @@ export function loadConfig(): Config {
     if (e.code !== "ENOENT") throw new Error(`${CONFIG_PATH}: ${e.message}`);
     exists = false;
   }
-  const cfg = { ...DEFAULTS, ...file, askModel: { ...DEFAULTS.askModel, ...file.askModel } };
-  if (!cfg.askModel.apiKey && process.env.GEMINI_API_KEY) cfg.askModel.apiKey = process.env.GEMINI_API_KEY;
+  const cfg = { ...DEFAULTS, ...file };
   if (!exists || Object.keys(DEFAULTS).some((k) => !(k in file))) {
     try {
       fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });

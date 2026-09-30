@@ -32,6 +32,7 @@ export const COMMANDS: Command[] = [
   { name: "prompt", args: "[edit]", desc: "show the system prompt; edit makes a copy to change" },
   { name: "log", desc: "where this conversation's full log is" },
   { name: "update", desc: "check for a new jcoder release and install it" },
+  { name: "advisors", desc: "the remote models ask_model can use, each tested" },
   { name: "exit", desc: "quit (also ctrl+d)" },
 ];
 

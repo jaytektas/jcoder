@@ -11,6 +11,7 @@
 import { chat, serverSlots, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
 import type { Config } from "./config.js";
 import type { Image } from "./images.js";
+import { resolveAdvisors, type Advisor } from "./advisors.js";
 import { agentPrompt } from "./prompt.js";
 import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
@@ -118,6 +119,7 @@ export class Agent {
   todos: Todo[] = [];
   /** Fixed for the session: the tool list is part of the prompt the server caches. */
   readonly tools: ToolSchema[];
+  readonly advisors: Advisor[];
   private agents = 0;
   private gate = new Gate(() => serverSlots);
 
@@ -129,7 +131,8 @@ export class Agent {
     /** Set for a sub-agent: its name, and the conversation whose log gets its record. */
     private sub?: { description: string; parent: Session },
   ) {
-    this.tools = schemas(cfg, !!sub);
+    this.advisors = resolveAdvisors(cfg.advisors, cfg.advisorTimeout);
+    this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl }, !!sub);
   }
 
   /** A sub-agent's record goes into its parent's log, marked with its name. */
@@ -159,7 +162,7 @@ export class Agent {
       bashTimeout: this.cfg.bashTimeout,
       searchUrl: this.cfg.searchUrl,
       jobs: this.jobs,
-      askModel: this.cfg.askModel,
+      advisors: this.advisors,
       ask: (q, options) => this.view.ask(q, options),
       setTodos: (items) => {
         this.todos = items;

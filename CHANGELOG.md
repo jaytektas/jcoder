@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+- **Advisors.** `ask_model` can use several remote models, with presets for
+  Gemini, Groq, Cerebras, OpenRouter, NVIDIA and Claude: add a key and go.
+  When one is busy, rate-limited or down, the next answers. `/advisors`
+  tests them; `advisorTimeout` sets how long to wait. Replaces `askModel`.
+
 ## 0.2.0
 
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/jaytektas/jcoder/master/install.sh | sh`
