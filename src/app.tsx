@@ -133,18 +133,29 @@ interface Ask {
 
 // ---------- rendering pieces ----------
 
-function Spinner({ label, detail, since }: { label: string; detail: string; since: number }) {
+function bar(fraction: number, width = 20): string {
+  const f = Math.max(0, Math.min(1, fraction));
+  const filled = Math.round(f * width);
+  return `${"█".repeat(filled)}${"░".repeat(width - filled)} ${Math.floor(f * 100)}%`;
+}
+
+function Spinner({ label, detail, since, progress }: { label: string; detail: string; since: number; progress?: number }) {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setFrame((f) => f + 1), 120);
     return () => clearInterval(t);
   }, []);
   const secs = Math.floor((Date.now() - since) / 1000);
+  // One Text, so a narrow terminal wraps the line instead of squashing it.
   return (
     <Box marginTop={1}>
-      <Text color="magenta">{SPIN[frame % SPIN.length]} </Text>
-      <Text color="magenta">{label}… </Text>
-      <Text color="gray">({[`${secs}s`, detail, "esc to interrupt"].filter(Boolean).join(" · ")})</Text>
+      <Text wrap="wrap">
+        <Text color="magenta">
+          {SPIN[frame % SPIN.length]} {label}…{" "}
+        </Text>
+        {progress !== undefined && <Text color="magenta">{bar(progress)} </Text>}
+        <Text color="gray">({[`${secs}s`, detail, "esc to interrupt"].filter(Boolean).join(" · ")})</Text>
+      </Text>
     </Box>
   );
 }
@@ -188,7 +199,7 @@ function App(props: Props) {
   const [items, setItems] = useState<Item[]>([]);
   const [live, setLive] = useState("");
   const [liveThought, setLiveThought] = useState("");
-  const [busy, setBusy] = useState<{ label: string; detail: string; since: number } | null>(null);
+  const [busy, setBusy] = useState<{ label: string; detail: string; since: number; progress?: number } | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
@@ -277,8 +288,8 @@ function App(props: Props) {
   };
 
   const view: View = {
-    busy(label, detail = "") {
-      setBusy((b) => ({ label, detail, since: b?.since ?? Date.now() }));
+    busy(label, detail = "", progress) {
+      setBusy((b) => ({ label, detail, progress, since: b?.since ?? Date.now() }));
     },
     thinking(chunk) {
       s.current.thought += chunk;

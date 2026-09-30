@@ -3,8 +3,8 @@ import { c, indent, preview, write } from "./ui.js";
 
 /** What the agent reports while it works. The Ink app and plain output both implement it. */
 export interface View {
-  /** The status line while a turn runs: "Thinking", "Running bash", ... */
-  busy(label: string, detail?: string): void;
+  /** The status line while a turn runs: "Thinking", "Running bash", ... `progress` 0–1 draws a bar. */
+  busy(label: string, detail?: string, progress?: number): void;
   /** A chunk of the model's thinking; only sent while thinking is shown. */
   thinking(chunk: string): void;
   /** A chunk of the model's reply. */

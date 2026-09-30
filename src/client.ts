@@ -50,6 +50,8 @@ export interface Handlers {
   onContent?(text: string): void;
   /** A tool call's arguments grew; `chars` is their length so far. */
   onToolArgs?(name: string, chars: number): void;
+  /** llama.cpp reading the prompt: tokens done of the total, the cached part included. */
+  onPromptProgress?(done: number, total: number, cached: number): void;
 }
 
 function headers(cfg: Config): Record<string, string> {
@@ -135,7 +137,7 @@ export async function chat(
   tools: ToolSchema[],
   h: Handlers,
   signal: AbortSignal,
-  opts: { thinking?: boolean; toolChoice?: "auto" | "none" } = {},
+  opts: { thinking?: boolean; toolChoice?: "auto" | "none"; maxTokens?: number } = {},
 ): Promise<Reply> {
   const body: Record<string, unknown> = {
     ...cfg.extraBody,
@@ -143,10 +145,13 @@ export async function chat(
     messages,
     stream: true,
     stream_options: { include_usage: true },
+    // llama.cpp: report progress while it reads the prompt. Others ignore it.
+    return_progress: true,
     chat_template_kwargs: { enable_thinking: opts.thinking ?? cfg.thinking },
   };
   if (tools.length) body.tools = tools;
   if (opts.toolChoice) body.tool_choice = opts.toolChoice;
+  if (opts.maxTokens) body.max_tokens = opts.maxTokens;
 
   const r = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
     method: "POST",
@@ -168,6 +173,8 @@ export async function chat(
     if (data === "[DONE]") return;
     const j = JSON.parse(data);
     if (j.error) throw new Error(j.error.message ?? JSON.stringify(j.error));
+    const pp = j.prompt_progress;
+    if (pp && typeof pp.total === "number") h.onPromptProgress?.(pp.cache + pp.processed, pp.total, pp.cache);
     if (j.usage) {
       out.usage = {
         prompt: j.usage.prompt_tokens ?? 0,

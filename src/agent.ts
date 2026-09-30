@@ -9,6 +9,14 @@ import type { View } from "./view.js";
 
 export const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
+/** A bar for reading the prompt, but only when there's enough uncached to take a while. */
+function readingProgress(view: View, label: string) {
+  return (done: number, total: number, cached: number) => {
+    if (total - cached < 2000 || done >= total) return;
+    view.busy(label, `${k(done)}/${k(total)} tokens`, done / total);
+  };
+}
+
 export class Agent {
   /** Tokens the next request's prompt will be, roughly: last prompt + last reply. */
   used = 0;
@@ -150,6 +158,7 @@ export class Agent {
             this.view.busy("Writing");
           },
           onToolArgs: (name, chars) => this.view.busy(`Preparing ${name}`, `${k(chars)} chars`),
+          onPromptProgress: readingProgress(this.view, "Reading"),
         },
         signal,
       );
@@ -253,16 +262,22 @@ export class Agent {
       "Stop working for a moment. The conversation is about to be cut to save space. " +
       "Write a summary that lets you carry on without it: the user's goal and requests, " +
       "decisions made, files changed and how, the current state (what works, what fails, exact errors), " +
-      "and the next steps. Be specific: paths, function names, commands. No tool calls.";
-    this.view.busy("Compacting");
-    let chars = 0;
+      "and the next steps. Be specific: paths, function names, commands. About 800 to 1200 words. No tool calls.";
+    this.view.busy("Compacting: reading", "", 0);
+    // Writing: the bar fills towards the length asked for (~1500 tokens) and
+    // waits at 95% if the summary runs long.
+    const EXPECTED = 1500;
+    let tokens = 0;
     const reply = await chat(
       this.cfg,
       [...this.messages, { role: "user", content: ask }],
       this.tools,
-      { onContent: (t) => this.view.busy("Compacting", `${k((chars += t.length))} chars`) },
+      {
+        onPromptProgress: readingProgress(this.view, "Compacting: reading"),
+        onContent: () => this.view.busy("Compacting: summarising", `${k(++tokens)} tokens`, Math.min(0.95, tokens / EXPECTED)),
+      },
       signal,
-      { thinking: false, toolChoice: "none" },
+      { thinking: false, toolChoice: "none", maxTokens: 4096 },
     );
     const summary = reply.content.trim();
     if (!summary) throw new Error("compaction produced no summary");
