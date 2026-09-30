@@ -6,10 +6,24 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+export type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+/** Plain text, or text and images. */
+export type Content = string | Part[];
+
 export type Message =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: Content }
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
-  | { role: "tool"; tool_call_id: string; content: string };
+  | { role: "tool"; tool_call_id: string; content: Content };
+
+export function textOf(c: Content | null): string {
+  if (c === null) return "";
+  if (typeof c === "string") return c;
+  return c.map((p) => (p.type === "text" ? p.text : "[image]")).join("\n");
+}
+
+export const imageCount = (c: Content | null) =>
+  Array.isArray(c) ? c.filter((p) => p.type === "image_url").length : 0;
 
 export interface ToolSchema {
   type: "function";

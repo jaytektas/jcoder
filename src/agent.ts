@@ -1,6 +1,7 @@
-import { chat, type Message, type Reply, type ToolCall } from "./client.js";
+import { chat, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall } from "./client.js";
 import type { Config } from "./config.js";
-import { saveSession, type Session } from "./session.js";
+import type { Image } from "./images.js";
+import { log, saveSession, storeContent, type Session } from "./session.js";
 import { SCHEMAS, TOOLS, type Approval, type ToolContext, type ToolResult } from "./tools.js";
 import { c, indent, preview, readLine, Spinner, watchKeys, write } from "./ui.js";
 
@@ -32,8 +33,12 @@ export class Agent {
   }
 
   /** Runs one user request to the end: model, tools, model, ... */
-  async turn(text: string): Promise<void> {
-    this.messages.push({ role: "user", content: text });
+  async turn(text: string, images: Image[] = []): Promise<void> {
+    const content: Content = images.length
+      ? [{ type: "text", text }, ...images.map((i): Part => ({ type: "image_url", image_url: { url: i.url } }))]
+      : text;
+    this.messages.push({ role: "user", content });
+    log(this.session, { type: "user", content: storeContent(content) });
     this.abort = new AbortController();
     const signal = this.abort.signal;
     this.unwatch = this.interactive ? this.watch() : () => {};
@@ -42,6 +47,14 @@ export class Agent {
         if (this.used > this.cfg.compactAt * this.contextWindow) await this.compact(signal, true);
         const reply = await this.generate(signal);
         if (!reply) break;
+        log(this.session, {
+          type: "assistant",
+          content: reply.content,
+          reasoning: reply.reasoning || undefined,
+          tool_calls: reply.toolCalls.length ? reply.toolCalls : undefined,
+          finish: reply.finish,
+          usage: reply.usage,
+        });
         this.messages.push({
           role: "assistant",
           content: reply.content || null,
@@ -57,6 +70,7 @@ export class Agent {
       }
     } catch (e: any) {
       if (!signal.aborted) write(c.red(`error: ${e.message}\n`));
+      log(this.session, { type: "error", message: e.message });
     } finally {
       this.spinner.stop();
       this.unwatch();
@@ -162,9 +176,11 @@ export class Agent {
       if (signal.aborted) {
         // Keep the history well-formed: every user message gets an answer.
         this.messages.push({ role: "assistant", content: (printed ? printed + "\n" : "") + "[interrupted by the user]" });
+        log(this.session, { type: "interrupted", content: printed });
         return null;
       }
       write(c.red(`error: ${e.message}\n`));
+      log(this.session, { type: "error", message: e.message });
       this.messages.push({ role: "assistant", content: `[request failed: ${e.message}]` });
       return null;
     }
@@ -179,6 +195,13 @@ export class Agent {
         result = await this.runTool(call, signal);
       }
       this.messages.push({ role: "tool", tool_call_id: call.id, content: result.content });
+      log(this.session, {
+        type: "tool",
+        id: call.id,
+        name: call.function.name,
+        content: storeContent(result.content),
+        error: result.error || undefined,
+      });
     }
   }
 
@@ -220,13 +243,14 @@ export class Agent {
       }
     }
 
-    const shown = result.display ?? preview(result.content, 6);
+    const shown = result.display ?? preview(textOf(result.content), 6);
     write(indent(result.error ? c.red(preview(shown, 8)) : c.gray(shown), "  ⎿ ").replace(/\n  ⎿ /g, "\n    ") + "\n");
 
     const key = name + call.function.arguments;
-    if (key === this.repeat.key && result.content === this.repeat.result) this.repeat.count++;
-    else this.repeat = { key, result: result.content, count: 1 };
-    if (this.repeat.count >= 3)
+    const text = textOf(result.content);
+    if (key === this.repeat.key && text === this.repeat.result) this.repeat.count++;
+    else this.repeat = { key, result: text, count: 1 };
+    if (this.repeat.count >= 3 && typeof result.content === "string")
       result.content += `\n\n[You have made this exact call ${this.repeat.count} times with the same result. Stop and try something different.]`;
     return result;
   }
@@ -283,11 +307,17 @@ export class Agent {
     }
     if (!summary) throw new Error("compaction produced no summary");
     const before = this.used;
-    let content = `This conversation was compacted to save space. Summary of it so far:\n\n${summary}`;
-    if (midTurn && lastUser) content += `\n\nThe user's latest request, word for word:\n${lastUser.content}\n\nCarry on with it.`;
+    let text = `This conversation was compacted to save space. Summary of it so far:\n\n${summary}`;
+    let images: Part[] = [];
+    if (midTurn && lastUser) {
+      text += `\n\nThe user's latest request, word for word:\n${textOf(lastUser.content)}\n\nCarry on with it.`;
+      if (Array.isArray(lastUser.content)) images = lastUser.content.filter((p) => p.type === "image_url");
+    }
+    const content: Content = images.length ? [{ type: "text", text }, ...images] : text;
+    log(this.session, { type: "compact", tokensBefore: this.used, summary });
     this.session.messages = [this.messages[0], { role: "user", content }];
     if (!midTurn) this.session.messages.push({ role: "assistant", content: "Got it. What next?" });
-    this.used = Math.ceil((this.messages[0].content!.length + content.length) / 3.5);
+    this.estimateUsed();
     this.seen.clear();
     write(c.gray(`[compacted: ~${k(before)} → ~${k(this.used)} tokens]\n`));
     saveSession(this.session);
@@ -310,6 +340,14 @@ export class Agent {
 
   /** Estimate after loading a saved session; corrected by the first reply. */
   estimateUsed(): void {
-    this.used = Math.ceil(JSON.stringify(this.messages).length / 3.5);
+    // ~3.5 characters a token; an image is at most --image-max-tokens (1024 here).
+    let chars = 0;
+    let images = 0;
+    for (const m of this.messages) {
+      chars += textOf(m.content).length;
+      images += imageCount(m.content);
+      if (m.role === "assistant" && m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
+    }
+    this.used = Math.ceil(chars / 3.5) + images * 1024;
   }
 }

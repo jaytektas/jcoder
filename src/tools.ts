@@ -1,13 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { ToolSchema } from "./client.js";
+import type { Content, ToolSchema } from "./client.js";
 import { HOME, type Mode } from "./config.js";
+import { isImagePath, kb, loadImage } from "./images.js";
 import { c } from "./ui.js";
 
 export interface ToolResult {
   /** What the model sees. */
-  content: string;
+  content: Content;
   /** What the user sees, if different from a preview of content. */
   display?: string;
   error?: boolean;
@@ -101,7 +102,7 @@ function diffPreview(oldText: string, newText: string, maxLines = 12): string {
 const readFile: Tool = {
   schema: def(
     "read_file",
-    "Read a text file. Returns numbered lines. Large files: use offset/limit.",
+    "Read a text file (numbered lines; large files: use offset/limit), or look at an image (png, jpg, gif, webp, bmp).",
     {
       path: str("File path, absolute or relative to the project"),
       offset: int("First line to read, 1-based (default 1)"),
@@ -119,6 +120,21 @@ const readFile: Tool = {
       buf = fs.readFileSync(abs);
     } catch (e: any) {
       return fail(e.code === "ENOENT" ? `${a.path} does not exist.` : e.message);
+    }
+    if (isImagePath(abs)) {
+      let img;
+      try {
+        img = loadImage(abs);
+      } catch (e: any) {
+        return fail(e.message);
+      }
+      return {
+        content: [
+          { type: "text", text: `Image ${rel(ctx, abs)} (${kb(img.bytes)}):` },
+          { type: "image_url", image_url: { url: img.url } },
+        ],
+        display: `image, ${kb(img.bytes)}`,
+      };
     }
     if (buf.subarray(0, 8000).includes(0)) return fail(`${a.path} is a binary file.`);
     ctx.seen.set(abs, mtime(abs));

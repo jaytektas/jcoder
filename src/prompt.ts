@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { HOME } from "./config.js";
 
 const NOTES = ["JCODER.md", "AGENTS.md"];
@@ -31,28 +32,30 @@ function gitBranch(cwd: string): string | null {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
+/** The built-in template, shipped next to dist/. */
+export const DEFAULT_TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "prompts", "system.md");
+/** A copy here replaces the built-in one. */
+export const USER_TEMPLATE = path.join(HOME, "system.md");
+
+export function templatePath(): string {
+  return fs.existsSync(USER_TEMPLATE) ? USER_TEMPLATE : DEFAULT_TEMPLATE;
+}
+
+/**
+ * The system prompt: the template with {{cwd}}, {{git}}, {{os}}, {{date}} and
+ * {{notes}} filled in. Unknown {{names}} are left as they are.
+ */
 export function systemPrompt(cwd: string): string {
   const branch = gitBranch(cwd);
-  const env = [
-    `Project directory: ${cwd}`,
-    branch ? `Git branch: ${branch}` : "Not a git repository",
-    `OS: ${os.type()} ${os.release()}`,
-    `Date: ${new Date().toISOString().slice(0, 10)}`,
-  ].join("\n");
-
-  let p = `You are jcoder, a coding agent working in the user's project through tools.
-
-How to work:
-- Look before you change: read the relevant code first. Don't guess at file contents, APIs or command output.
-- Make the change the user asked for, nothing more. Match the style of the surrounding code.
-- Use edit_file for changes to existing files; old_string must be copied exactly from read_file output (without the line-number prefix).
-- After changing code, build or run the tests if the project has them, and fix what you broke.
-- If a command or edit fails, read the error and change approach. Don't repeat the same failing call.
-- When you're done, reply with a short plain summary of what you did and anything left undone. If something failed, say so.
-- Ask the user only when you can't proceed without their decision.
-
-${env}`;
-
-  for (const n of notes(cwd)) p += `\n\nNotes from ${n.file}:\n${n.text}`;
-  return p;
+  const vars: Record<string, string> = {
+    cwd,
+    git: branch ? `Git branch: ${branch}` : "Not a git repository",
+    os: `${os.type()} ${os.release()}`,
+    date: new Date().toLocaleDateString("en-CA"), // local YYYY-MM-DD
+    notes: notes(cwd)
+      .map((n) => `\nNotes from ${n.file}:\n${n.text}`)
+      .join("\n"),
+  };
+  const template = fs.readFileSync(templatePath(), "utf8");
+  return template.replace(/\{\{(\w+)\}\}/g, (m, name) => vars[name] ?? m).trim();
 }

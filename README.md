@@ -27,6 +27,30 @@ Built to make the most of a local model:
 Esc stops the model. Ctrl+T shows or hides its thinking. `/help` lists the
 commands.
 
+## Images
+
+- **Ctrl+V** pastes an image from the clipboard (`wl-paste`, or `xclip` on X11)
+  and puts `[image #1]` in the line. Delete the marker to drop the image.
+- **Image paths** in a message are attached — quoted, `file://`, or with
+  escaped spaces, as a terminal pastes a dragged-in file.
+- **read_file** on a png/jpg/gif/webp/bmp shows the image to the model.
+
+## Sessions and logs
+
+`~/.jcoder/sessions/<id>.json` is the current conversation, rewritten after
+each turn; `jcoder -c` and `/resume` load it. `<id>.log.jsonl` next to it is
+the full record, only ever appended to: every message with the model's
+thinking, tool calls and results, errors, and the summary each compaction
+made. `/log` prints its path. Images are stored once in `~/.jcoder/images/`
+and referenced from both.
+
+## System prompt
+
+The template is `prompts/system.md`. `/prompt edit` copies it to
+`~/.jcoder/system.md`, which then replaces it. Placeholders: `{{cwd}}`,
+`{{git}}`, `{{os}}`, `{{date}}`, `{{notes}}`. `/prompt` shows the result.
+Changes take effect in a new conversation.
+
 ## Settings
 
 `~/.jcoder/config.json` (or `$JCODER_CONFIG`):

@@ -90,7 +90,12 @@ const inputHistory: string[] = [];
  * that come within a few ms of each other are joined into one answer, and a
  * pasted last line without a newline waits for Enter.
  */
-export function readLine(prompt: string, remember = true): Promise<string | null> {
+export function readLine(
+  prompt: string,
+  remember = true,
+  /** Ctrl+V: returns text to insert at the cursor, or null. */
+  onCtrlV?: () => string | null,
+): Promise<string | null> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({
       input: process.stdin,
@@ -102,10 +107,18 @@ export function readLine(prompt: string, remember = true): Promise<string | null
     const lines: string[] = [];
     let timer: NodeJS.Timeout | undefined;
     let done = false;
+    const onKey = (_s: string, key: { ctrl?: boolean; name?: string } | undefined) => {
+      if (!onCtrlV || !key?.ctrl || key.name !== "v") return;
+      const text = onCtrlV();
+      if (text) rl.write(text);
+      else write("\x07");
+    };
+    process.stdin.on("keypress", onKey);
     const finish = (v: string | null) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      process.stdin.off("keypress", onKey);
       rl.close();
       if (v && remember && lines.length > 1) inputHistory.unshift(v);
       resolve(v);

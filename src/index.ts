@@ -1,9 +1,12 @@
 #!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
 import { Agent } from "./agent.js";
-import { listModels, serverContext } from "./client.js";
+import { listModels, serverContext, textOf } from "./client.js";
 import { CONFIG_PATH, loadConfig, saveConfig, type Config, type Mode } from "./config.js";
-import { notes, systemPrompt } from "./prompt.js";
-import { listSessions, newSession, title, type Session } from "./session.js";
+import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
+import { clipboardImage, imagePathsIn, kb, loadImage, type Image } from "./images.js";
+import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
 import { c, readLine, write } from "./ui.js";
 
 const MODES: Mode[] = ["ro", "edit", "auto"];
@@ -22,8 +25,13 @@ const HELP = `Commands:
   /resume         pick an earlier conversation in this directory
   /model [id]     list the server's models, or switch
   /ctx            context use
+  /log            where this conversation's full log is
+  /prompt         show the system prompt and where its template is
+  /prompt edit    copy the template to ~/.jcoder/system.md to edit it
   /exit           quit (or Ctrl+D)
 
+Images: Ctrl+V pastes one from the clipboard; image paths in a message (or files
+  dragged into the terminal) are attached; the model can open image files itself.
 Keys: Esc stops the model · Ctrl+T shows/hides thinking · Ctrl+C on an empty line quits
 Notes: ~/.jcoder/JCODER.md and the project's JCODER.md or AGENTS.md go into the prompt.
 Settings: ${CONFIG_PATH}`;
@@ -79,11 +87,33 @@ function replay(s: Session) {
   // Show the tail of a resumed conversation so the user knows where it was.
   const shown = s.messages.filter((m) => (m.role === "user" || m.role === "assistant") && m.content).slice(-4);
   for (const m of shown) {
-    const text = String(m.content);
+    const text = textOf(m.content);
     const cut = text.length > 600 ? text.slice(0, 600) + "…" : text;
     write(m.role === "user" ? c.cyan(`› ${cut}\n`) : `${cut}\n`);
   }
   write("\n");
+}
+
+/** Pasted images whose placeholder is still in the line, then image files it names. */
+function attachments(line: string, pasted: Image[], cwd: string): Image[] {
+  const images: Image[] = [];
+  const notes: string[] = [];
+  pasted.forEach((img, i) => {
+    if (!line.includes(`[image #${i + 1}]`)) return;
+    images.push(img);
+    notes.push(`[image #${i + 1}] ${kb(img.bytes)}`);
+  });
+  for (const file of imagePathsIn(line, cwd)) {
+    try {
+      const img = loadImage(file);
+      images.push(img);
+      notes.push(`${file} ${kb(img.bytes)}`);
+    } catch (e: any) {
+      write(c.red(`${e.message}\n`));
+    }
+  }
+  if (notes.length) write(c.gray(`  attached: ${notes.join(", ")}\n`));
+  return images;
 }
 
 async function main() {
@@ -105,13 +135,13 @@ async function main() {
   let session = newSession(cwd, cfg.model, systemPrompt(cwd));
   if (args.cont) {
     const last = listSessions(cwd)[0];
-    if (last) session = last;
+    if (last) session = openSession(last);
     else write(c.gray("no earlier conversation here; starting a new one\n"));
   }
 
   if (args.print !== undefined) {
     const agent = new Agent(cfg, session, ctxWindow, false);
-    await agent.turn(args.print);
+    await agent.turn(args.print, attachments(args.print, [], cwd));
     return;
   }
 
@@ -123,7 +153,13 @@ async function main() {
   }
 
   for (;;) {
-    const input = await readLine(c.cyan(`${cfg.mode === "edit" ? "" : cfg.mode + " "}› `));
+    const pasted: Image[] = [];
+    const input = await readLine(c.cyan(`${cfg.mode === "edit" ? "" : cfg.mode + " "}› `), true, () => {
+      const img = clipboardImage();
+      if (!img) return null;
+      pasted.push(img);
+      return `[image #${pasted.length}]`;
+    });
     if (input === null) break;
     const line = input.trim();
     if (!line) continue;
@@ -178,7 +214,7 @@ async function main() {
           const pick = await readLine("number (Enter to cancel): ", false);
           const idx = Number(pick) - 1;
           if (!pick || !list[idx]) break;
-          session = list[idx];
+          session = openSession(list[idx]);
           agent = new Agent(cfg, session, ctxWindow, true);
           agent.estimateUsed();
           replay(session);
@@ -209,13 +245,27 @@ async function main() {
         case "ctx":
           write(agent.status() + "\n");
           break;
+        case "prompt":
+          if (arg === "edit") {
+            if (!fs.existsSync(USER_TEMPLATE)) {
+              fs.mkdirSync(path.dirname(USER_TEMPLATE), { recursive: true });
+              fs.copyFileSync(DEFAULT_TEMPLATE, USER_TEMPLATE);
+            }
+            write(`edit ${USER_TEMPLATE} — it's used from the next /clear or new session\n`);
+            break;
+          }
+          write(c.gray(`template: ${templatePath()}\n\n`) + systemPrompt(cwd) + "\n");
+          break;
+        case "log":
+          write(`${logPath(session)}\n`);
+          break;
         default:
           write(c.red(`unknown command /${cmd} — /help\n`));
       }
       continue;
     }
 
-    await agent.turn(line);
+    await agent.turn(line, attachments(line, pasted, cwd));
   }
 }
 
