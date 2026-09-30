@@ -85,6 +85,16 @@ The template is `prompts/system.md`. `/prompt edit` copies it to
 `{{git}}`, `{{os}}`, `{{date}}`, `{{notes}}`. `/prompt` shows the result.
 Changes take effect in a new conversation.
 
+## Effort
+
+How hard the model thinks. llama.cpp caps the thinking at the budget
+(`reasoning_budget_tokens`) and then makes the model answer, so a model
+that starts thinking in circles can't eat the whole reply. Other servers
+get `reasoning_effort` (low/medium/high) instead. `off` turns thinking off
+through the chat template without touching the prompt, so the server's
+cache is kept. The cap works with models whose thinking llama.cpp
+recognises (Qwen3.x, DeepSeek-R1 style and similar).
+
 ## Settings
 
 `~/.jcoder/config.json` (or `$JCODER_CONFIG`). It's written with every
@@ -97,7 +107,7 @@ it always shows what there is:
 | `model` | first listed | model id |
 | `apiKey` | | bearer token, if the server wants one |
 | `contextWindow` | 32768 | used when the server doesn't report it (llama.cpp does) |
-| `thinking` | true | `/think` |
+| `effort` | `high` | `/effort`: `off` no thinking · `low` 512 · `medium` 2048 · `high` 8192 thinking tokens a reply · `max` no limit |
 | `showThinking` | false | `/thoughts`, Ctrl+T |
 | `mode` | `edit` | `ro` read-only · `edit` edits freely, asks before commands · `auto` asks nothing |
 | `maxToolChars` | 24000 | tool results longer than this are cut |

@@ -4,6 +4,12 @@ import path from "node:path";
 
 export type Mode = "ro" | "edit" | "auto";
 
+/** How hard the model thinks: off, or a cap on its thinking tokens. */
+export type Effort = "off" | "low" | "medium" | "high" | "max";
+export const EFFORTS: Effort[] = ["off", "low", "medium", "high", "max"];
+/** Thinking tokens allowed per reply; -1 = no limit. */
+export const EFFORT_BUDGET: Record<Effort, number> = { off: 0, low: 512, medium: 2048, high: 8192, max: -1 };
+
 /** A remote model the local one can ask for a second opinion (ask_model). */
 export interface AskModel {
   name: string;
@@ -22,8 +28,8 @@ export interface Config {
   apiKey: string;
   /** Used when the server can't tell us its context size. */
   contextWindow: number;
-  /** Ask the model to think (chat_template_kwargs.enable_thinking). */
-  thinking: boolean;
+  /** off | low | medium | high | max: thinking off, or capped at 512 / 2048 / 8192 tokens, or unlimited. */
+  effort: Effort;
   /** Print the model's thinking instead of a spinner. */
   showThinking: boolean;
   mode: Mode;
@@ -48,7 +54,7 @@ const DEFAULTS: Config = {
   model: "",
   apiKey: "",
   contextWindow: 32768,
-  thinking: true,
+  effort: "high",
   showThinking: false,
   mode: "edit",
   maxToolChars: 24000,
@@ -95,7 +101,8 @@ export function saveConfig(cfg: Config): void {
   try {
     file = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
   } catch {}
-  for (const k of ["thinking", "showThinking", "mode"] as const) file[k] = cfg[k];
+  for (const k of ["effort", "showThinking", "mode"] as const) file[k] = cfg[k];
+  delete file.thinking;
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(file, null, 2) + "\n");
 }

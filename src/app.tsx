@@ -7,7 +7,7 @@ import { Agent, k } from "./agent.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf } from "./client.js";
 import { COMMANDS } from "./complete.js";
-import { saveConfig, type Config, type Mode } from "./config.js";
+import { EFFORT_BUDGET, EFFORTS, saveConfig, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown } from "./markdown.js";
@@ -411,6 +411,13 @@ function App(props: Props) {
   const choose = (title: string, options: string[]) =>
     new Promise<number | null>((resolve) => setPick({ title, options, resolve }));
 
+  const setEffort = (e: Effort) => {
+    cfg.effort = e;
+    saveConfig(cfg);
+    const b = EFFORT_BUDGET[e];
+    notice(`Effort ${e}: ${e === "off" ? "no thinking" : b < 0 ? "thinking without a limit" : `thinking up to ${k(b)} tokens a reply`}.`);
+  };
+
   const setMode = (m: Mode) => {
     cfg.mode = m;
     saveConfig(cfg);
@@ -433,7 +440,8 @@ function App(props: Props) {
             ansi.gray("@path          attach a file (its text, an image, or a directory listing)"),
             ansi.gray("ctrl+v         paste an image from the clipboard"),
             ansi.gray("\\ + enter      new line (alt+enter and ctrl+j too)"),
-            ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking · esc stop · ctrl+d quit"),
+            ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking"),
+            ansi.gray("esc            stop the model · ctrl+d quit"),
             ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
           ].join("\n"),
         });
@@ -474,11 +482,12 @@ function App(props: Props) {
         else setMode(m);
         break;
       }
-      case "think":
-        cfg.thinking = !cfg.thinking;
-        saveConfig(cfg);
-        notice(`Model thinking ${cfg.thinking ? "on" : "off"}.`);
+      case "effort": {
+        const e = (arg || EFFORTS[(EFFORTS.indexOf(cfg.effort) + 1) % EFFORTS.length]) as Effort;
+        if (!EFFORTS.includes(e)) notice("Effort: off, low, medium, high or max", "error");
+        else setEffort(e);
         break;
+      }
       case "thoughts":
         cfg.showThinking = !cfg.showThinking;
         saveConfig(cfg);
@@ -715,8 +724,8 @@ function App(props: Props) {
             )}
           </Text>
           <Text color="gray">
-            ctx {a.usedPct}% · {cfg.thinking ? (cfg.showThinking ? "thoughts shown" : "thoughts hidden") : "thinking off"}
-            {cfg.thinking ? " (ctrl+t)" : ""}
+            ctx {a.usedPct}% · effort {cfg.effort} (/effort)
+            {cfg.effort !== "off" ? (cfg.showThinking ? " · thoughts shown" : " · thoughts hidden") : ""}
           </Text>
         </Box>
       </Box>

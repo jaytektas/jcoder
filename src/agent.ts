@@ -277,7 +277,7 @@ export class Agent {
         onContent: () => this.view.busy("Compacting: summarising", `${k(++tokens)} tokens`, Math.min(0.95, tokens / EXPECTED)),
       },
       signal,
-      { thinking: false, toolChoice: "none", maxTokens: 4096 },
+      { effort: "off", toolChoice: "none", maxTokens: 4096 },
     );
     const summary = reply.content.trim();
     if (!summary) throw new Error("compaction produced no summary");

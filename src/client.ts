@@ -1,4 +1,4 @@
-import type { Config } from "./config.js";
+import { EFFORT_BUDGET, type Config, type Effort } from "./config.js";
 
 export interface ToolCall {
   id: string;
@@ -137,7 +137,7 @@ export async function chat(
   tools: ToolSchema[],
   h: Handlers,
   signal: AbortSignal,
-  opts: { thinking?: boolean; toolChoice?: "auto" | "none"; maxTokens?: number } = {},
+  opts: { effort?: Effort; toolChoice?: "auto" | "none"; maxTokens?: number } = {},
 ): Promise<Reply> {
   const body: Record<string, unknown> = {
     ...cfg.extraBody,
@@ -147,8 +147,18 @@ export async function chat(
     stream_options: { include_usage: true },
     // llama.cpp: report progress while it reads the prompt. Others ignore it.
     return_progress: true,
-    chat_template_kwargs: { enable_thinking: opts.thinking ?? cfg.thinking },
   };
+  // Effort. llama.cpp caps thinking with reasoning_budget_tokens and then
+  // makes the model answer; other servers read reasoning_effort. Each
+  // ignores the other's field.
+  const effort = opts.effort ?? cfg.effort;
+  const budget = EFFORT_BUDGET[effort];
+  body.chat_template_kwargs = { enable_thinking: effort !== "off" };
+  if (budget > 0) {
+    body.reasoning_budget_tokens = budget;
+    body.reasoning_budget_message = "\n\nThat's my thinking budget used up; I'll answer now with what I have.\n";
+  }
+  if (effort === "low" || effort === "medium" || effort === "high") body.reasoning_effort = effort;
   if (tools.length) body.tools = tools;
   if (opts.toolChoice) body.tool_choice = opts.toolChoice;
   if (opts.maxTokens) body.max_tokens = opts.maxTokens;
