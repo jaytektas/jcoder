@@ -24,6 +24,7 @@ import { renderLines, renderMarkdown } from "./markdown.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
 import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
+import { LOGO_WIDTH, logo } from "./logo.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { View } from "./view.js";
 
@@ -386,8 +387,17 @@ function App(props: Props) {
   // Banner, once.
   useEffect(() => {
     const n = notes(cwd);
+    const art = logo(columns);
     const lines = [
-      `${ansi.bold(ansi.magenta("◆ jcoder"))} ${ansi.gray(VERSION)}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`,
+      ...(art
+        ? [
+            "",
+            art,
+            `${" ".repeat(LOGO_WIDTH - 9)}\x1b[1m\x1b[38;5;214mc o d e r\x1b[39m\x1b[22m`,
+            "",
+            ansi.gray(`  jcoder ${VERSION} · ${cfg.model} · ctx ${k(ctxWindow)}`),
+          ]
+        : [`${ansi.bold(ansi.magenta("◆ jcoder"))} ${ansi.gray(VERSION)}  ${ansi.gray(`${cfg.model} · ctx ${k(ctxWindow)}`)}`]),
       ansi.gray(`  ${tilde(cwd)}`),
       ...(n.length ? [ansi.gray(`  notes: ${n.map((x) => tilde(x.file)).join(", ")}`)] : []),
       ansi.gray("  / for commands · @ for files · ctrl+v pastes an image · esc stops the model"),
@@ -634,7 +644,9 @@ function App(props: Props) {
     <Width.Provider value={columns}>
       <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>
 
-      <Box ref={liveRef} flexDirection="column" justifyContent="flex-end" minHeight={Math.min(budget, maxBudget)}>
+      <Box flexDirection="column" justifyContent="flex-end" minHeight={Math.min(budget, maxBudget)}>
+      {/* Measured without the padding around it: only real content growing past the budget grows it. */}
+      <Box ref={liveRef} flexDirection="column">
 
       {liveThought && <BlockView b={blocks.thought(fit(liveThought), !s.current.thoughtStarted)} />}
       {live && <BlockView b={blocks.reply(fit(s.current.inCode ? renderLines(live, true)[0] : live), !s.current.replyStarted)} />}
@@ -779,6 +791,7 @@ function App(props: Props) {
             {cfg.effort !== "off" ? (cfg.showThinking ? " · thoughts shown" : " · thoughts hidden") : ""}
           </Text>
         </Box>
+      </Box>
       </Box>
       </Box>
     </Width.Provider>
