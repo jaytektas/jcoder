@@ -1,5 +1,9 @@
 # Changes
 
+## Unreleased
+
+- `maxAgents`: cap how many sub-agents run at once, or `0` to turn agents off.
+
 ## 0.3.0
 
 - **Advisors.** `ask_model` can use several remote models, with presets for

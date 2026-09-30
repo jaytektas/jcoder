@@ -131,7 +131,8 @@ export class Agent {
   readonly tools: ToolSchema[];
   readonly advisors: Advisor[];
   private agents = 0;
-  private gate = new Gate(() => serverSlots);
+  // As many at once as the server has slots, or fewer if maxAgents says so.
+  private gate = new Gate(() => (this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, serverSlots) : serverSlots));
 
   constructor(
     private cfg: Config,
@@ -142,7 +143,7 @@ export class Agent {
     private sub?: { description: string; parent: Session },
   ) {
     this.advisors = resolveAdvisors(cfg.advisors, cfg.advisorTimeout);
-    this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl }, !!sub);
+    this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl, maxAgents: cfg.maxAgents }, !!sub);
   }
 
   /** A sub-agent's record goes into its parent's log, marked with its name. */

@@ -153,6 +153,8 @@ Each shows a live line above the input, and its permission questions come
 to you with its name. Its prompt is `prompts/agent.md`, overridable like
 the main one.
 
+`maxAgents` caps how many run at once, or `0` turns agents off.
+
 Agents run in parallel only if the server does. With llama.cpp, give it
 slots that share one KV cache, so any slot can use the whole context:
 
@@ -247,6 +249,7 @@ setting and its default on first run, so everything you can change is in it.
 | `showThinking` | false | show the model's thinking |
 | `mode` | `edit` | `ro` · `edit` · `auto` |
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
+| `maxAgents` | -1 | sub-agents at once: `0` turns agents off, a number caps them (never above the server's slots), `-1` follows the server's slots |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
 | `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |

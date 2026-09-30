@@ -47,6 +47,8 @@ export interface Config {
   dropAdvisors: DropPolicy;
   /** Look for new releases on GitHub (at most once a day) and offer to install them. */
   checkUpdates: boolean;
+  /** Sub-agents at once: 0 turns the agent tool off, a number caps them (never above the server's slots), -1 follows the server's slots. */
+  maxAgents: number;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
@@ -93,6 +95,7 @@ const DEFAULTS: Config = {
   mode: "edit",
   maxToolChars: 24000,
   bashTimeout: 120,
+  maxAgents: -1,
   searchUrl: "",
   checkUpdates: true,
   advisors: [],

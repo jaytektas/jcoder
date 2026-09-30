@@ -609,11 +609,12 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
 /** Tools a sub-agent doesn't get: it can't start agents, ask the user, or own the to-do list. */
 const MAIN_ONLY = new Set(["agent", "ask_user", "todo"]);
 
-export function schemas(opts: { advisors: Advisor[]; searchUrl: string }, sub = false): ToolSchema[] {
+export function schemas(opts: { advisors: Advisor[]; searchUrl: string; maxAgents: number }, sub = false): ToolSchema[] {
   // Tools that need setting up are only offered once they are.
   const names = opts.advisors.map((a) => `${a.name} (${a.model})`).join(", ");
   return Object.values(TOOLS)
     .filter((t) => !sub || !MAIN_ONLY.has(t.schema.function.name))
+    .filter((t) => t.schema.function.name !== "agent" || opts.maxAgents !== 0)
     .filter((t) => t.schema.function.name !== "ask_model" || opts.advisors.length)
     .filter((t) => t.schema.function.name !== "web_search" || opts.searchUrl)
     .map((t) =>
