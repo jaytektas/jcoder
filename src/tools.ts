@@ -16,6 +16,8 @@ export interface ToolResult {
 
 export interface Approval {
   ok: boolean;
+  /** Allow this tool for the rest of the session. */
+  always?: boolean;
   /** The user's reason for saying no, passed on to the model. */
   reason?: string;
 }
@@ -253,7 +255,8 @@ const bash: Tool = {
   schema: def(
     "bash",
     "Run a bash command in the project directory. Each call is a fresh shell: cd does not carry over. " +
-      "Output is stdout+stderr. Don't run interactive programs.",
+      "Output is stdout+stderr. Don't run interactive programs. For a server or anything long-running, " +
+      "start it in the background with its output redirected to a file (cmd > /tmp/x.log 2>&1 &); it keeps running after the call returns.",
     {
       command: str("The command"),
       timeout: int("Seconds before it is killed (default 120, max 600)"),
@@ -288,13 +291,24 @@ const bash: Tool = {
       ctx.signal.addEventListener("abort", onAbort);
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (out += d));
-      child.on("close", (code) => {
+      // Finish when bash exits, not when its output pipes close: a process it
+      // started in the background (a dev server, say) can hold them open for
+      // ever. Give the pipes a moment to drain, then let go of them and leave
+      // any background process running.
+      let finished = false;
+      const finish = (code: number | null) => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
         ctx.signal.removeEventListener("abort", onAbort);
+        child.stdout.destroy();
+        child.stderr.destroy();
         const status = why || `exit ${code}`;
         const body = out.trim() ? cap(out.replace(/\s+$/, ""), ctx.maxChars) : "(no output)";
         done({ content: `${body}\n[${status}]`, error: why !== "" || code !== 0 });
-      });
+      };
+      child.on("exit", (code) => setTimeout(() => finish(code), 200));
+      child.on("close", (code) => finish(code));
       child.on("error", (e) => done(fail(e.message)));
     });
   },
