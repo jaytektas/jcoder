@@ -1,5 +1,13 @@
 # Changes
 
+## 0.5.3
+
+- **`slots`**: how many requests the main server runs at once. llama.cpp
+  reports it; for one that doesn't (vLLM, SGLang, a hosted API, a load
+  balancer) jcoder assumed 4 and nothing could raise it. Now set it.
+- **`agentMaxTools`** (45): tool calls a sub-agent gets, told to wrap up at
+  two thirds. Was fixed at 30/45; raise it for a bigger model or context.
+
 ## 0.5.2
 
 - **You can see what agents are doing.** Each agent's line keeps its last

@@ -150,9 +150,6 @@ class SubView implements View {
   }
 }
 
-/** A sub-agent is told to wrap up at SUB_SOFT tool calls and stopped for its report at SUB_HARD. */
-const SUB_SOFT = 30;
-const SUB_HARD = 45;
 /** The same tool on the same target this many times in a row gets a nudge to stop redoing it. */
 const REDO_LIMIT = 4;
 
@@ -187,7 +184,7 @@ export class Agent {
     public contextWindow: number,
     private view: View,
     /** Set for a sub-agent: its name, and the conversation whose log gets its record. */
-    private sub?: { description: string; parent: Session },
+    private sub?: { description: string; parent: Session; maxTools: number },
   ) {
     this.advisors = resolveAdvisors(cfg.advisors, cfg.advisorTimeout);
     this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl, maxAgents: cfg.maxAgents }, !!sub);
@@ -290,7 +287,7 @@ export class Agent {
       }
       if (this.cfg.agentsOnMain || !endpoints.length) {
         if (!this.cfg.agentsOnMain) this.view.notice("No agent server answered, so agents run on the main server.", "warn");
-        endpoints.push({ name: "main", cfg: this.cfg, contextWindow: this.contextWindow, slots: serverInfo(this.cfg.baseUrl).slots ?? 4, running: 0 });
+        endpoints.push({ name: "main", cfg: this.cfg, contextWindow: this.contextWindow, slots: this.cfg.slots > 0 ? this.cfg.slots : (serverInfo(this.cfg.baseUrl).slots ?? 4), running: 0 });
       }
       const slots = endpoints.reduce((n, e) => n + e.slots, 0);
       return new Pool(endpoints, () => (this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, slots) : slots));
@@ -316,7 +313,7 @@ export class Agent {
       const session: Session = { id, cwd, model: ep.cfg.model, messages: [{ role: "system", content: agentPrompt(cwd) }], updated: "" };
       const where = ep.name === "main" ? "" : ep.name;
       view.start(where);
-      const agent = new Agent(ep.cfg, session, ep.contextWindow, view, { description, parent: this.session });
+      const agent = new Agent(ep.cfg, session, ep.contextWindow, view, { description, parent: this.session, maxTools: this.cfg.agentMaxTools });
       agent.allowed = this.allowed; // "don't ask again" covers its agents too
       const stop = () => agent.stop();
       signal.addEventListener("abort", stop);
@@ -376,7 +373,7 @@ export class Agent {
         if (!reply.toolCalls.length) break;
         await this.runTools(reply.toolCalls, signal);
         if (signal.aborted) break;
-        if (this.sub && this.calls >= SUB_HARD) {
+        if (this.sub && this.calls >= this.sub.maxTools) {
           // Out of budget: no more tools, just the report.
           const ask = `You've used ${this.calls} tool calls, the limit for a sub-agent. Stop now and write your report: what's done, what isn't, and what you found.`;
           this.messages.push({ role: "user", content: ask });
@@ -535,8 +532,10 @@ export class Agent {
       const what = name === "write_file" ? `rewritten ${target}` : name === "edit_file" ? `edited ${target}` : `run ${name} on ${String(target).slice(0, 80)}`;
       result.content += `\n\n[You've ${what} ${this.redo.count} times in a row. Stop redoing it: it's done unless something is actually broken. Move on, or finish.]`;
     }
-    if (this.sub && this.calls === SUB_SOFT && typeof result.content === "string")
-      result.content += `\n\n[That's ${SUB_SOFT} tool calls. Wrap up: finish only what's essential, then write your report. At ${SUB_HARD} your tools stop.]`;
+    // A sub-agent is told to wrap up at two thirds of its tool calls, and stopped for its report at all of them.
+    const soft = this.sub && Math.max(1, Math.floor((this.sub.maxTools * 2) / 3));
+    if (soft && this.calls === soft && typeof result.content === "string")
+      result.content += `\n\n[That's ${soft} tool calls. Wrap up: finish only what's essential, then write your report. At ${this.sub!.maxTools} your tools stop.]`;
 
     const key = name + call.function.arguments;
     const text = textOf(result.content);
@@ -621,7 +620,7 @@ export class Agent {
 
   /** Estimate after loading a saved session; corrected by the first reply. */
   estimateUsed(): void {
-    // ~3.5 characters a token; an image is at most --image-max-tokens (1024 here).
+    // ~3.5 characters a token, ~1000 an image (it varies by model; the first reply gives the real count).
     let chars = JSON.stringify(this.tools).length;
     let images = 0;
     for (const m of this.messages) {

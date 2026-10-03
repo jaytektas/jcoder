@@ -51,8 +51,12 @@ export interface Config {
   agentServers: AgentServer[];
   /** Run sub-agents on the main server too, when the agent servers are busy or there are none. */
   agentsOnMain: boolean;
-  /** Sub-agents at once: 0 turns the agent tool off, a number caps them (never above the server's slots), -1 follows the server's slots. */
+  /** Sub-agents at once: 0 turns the agent tool off, a number caps them (never above the servers' slots), -1 follows the servers' slots. */
   maxAgents: number;
+  /** Requests the main server runs at once, for sub-agents: 0 = what it reports (llama.cpp does), or 4 when it doesn't say. */
+  slots: number;
+  /** Tool calls a sub-agent may make: told to wrap up at two thirds, then stopped for its report. */
+  agentMaxTools: number;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
@@ -112,6 +116,8 @@ export const DEFAULTS: Config = {
   maxToolChars: 24000,
   bashTimeout: 120,
   maxAgents: -1,
+  slots: 0,
+  agentMaxTools: 45,
   agentServers: [],
   agentsOnMain: true,
   searchUrl: "",
@@ -172,7 +178,7 @@ export function saveConfig(cfg: Config): void {
 }
 
 /** Settings that take effect at once when changed with /setting; the rest at the next start. */
-export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "extraBody", "sampling"]);
+export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "agentMaxTools", "extraBody", "sampling"]);
 
 const CHOICES: Partial<Record<keyof Config, readonly string[]>> = {
   effort: EFFORTS,
@@ -201,7 +207,9 @@ export function parseSetting(key: keyof Config, text: string): { value: unknown 
     if (text === "" || !Number.isFinite(n)) return { error: `${key} is a number` };
     if (key === "maxAgents" && (!Number.isInteger(n) || n < -1)) return { error: "maxAgents is -1 (the server's slots), 0 (off) or a cap" };
     if (key === "compactAt" && !(n > 0 && n <= 1)) return { error: "compactAt is a share of the window, above 0 and up to 1 (e.g. 0.85)" };
-    if (key !== "maxAgents" && n <= 0) return { error: `${key} is above 0` };
+    if (key === "slots" && (!Number.isInteger(n) || n < 0)) return { error: "slots is 0 (what the server reports) or a number" };
+    if (key === "agentMaxTools" && (!Number.isInteger(n) || n < 1)) return { error: "agentMaxTools is a whole number above 0" };
+    if (key !== "maxAgents" && key !== "slots" && n <= 0) return { error: `${key} is above 0` };
     return { value: n };
   }
   if (typeof def === "string") return { value: text === '""' ? "" : text };

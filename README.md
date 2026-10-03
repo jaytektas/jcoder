@@ -154,7 +154,12 @@ Each shows a live line above the input, and its permission questions come
 to you with its name. Its prompt is `prompts/agent.md`, overridable like
 the main one.
 
-`maxAgents` caps how many run at once, or `0` turns agents off.
+`maxAgents` caps how many run at once, or `0` turns agents off. llama.cpp
+reports its slots; for a server that doesn't (vLLM, SGLang, a hosted API, a
+load balancer), jcoder assumes 4, so set `slots` to what it can really take.
+`agentMaxTools` (45) is how many tool calls an agent gets: it's told to wrap
+up at two thirds, then stopped for its report. Raise it for a bigger model
+or context.
 
 **Agents on other machines.** Agents can run on other servers, say a fast
 small model on another box, which suits the scouting jobs agents mostly do
@@ -259,7 +264,7 @@ card usually says what to use (the example is Qwen's advice for coding).
 setting and its default on first run, so everything you can change is in it.
 `/setting` changes any of them from inside jcoder and saves it: names in any
 case (`maxagents`), on/off for switches, `""` for empty, JSON for lists and
-objects. Effort, mode, thinking, `maxAgents`, timeouts, `compactAt`,
+objects. Effort, mode, thinking, `maxAgents`, `agentMaxTools`, timeouts, `compactAt`,
 `extraBody` and `sampling` apply at once; the rest at the next start.
 
 | key | default | |
@@ -274,7 +279,9 @@ objects. Effort, mode, thinking, `maxAgents`, timeouts, `compactAt`,
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
 | `agentServers` | `[]` | other servers for sub-agents, see [Agents on other machines](#tools) |
 | `agentsOnMain` | true | run sub-agents on the main server too |
-| `maxAgents` | -1 | sub-agents at once: `0` turns agents off, a number caps them (never above the server's slots), `-1` follows the server's slots |
+| `maxAgents` | -1 | sub-agents at once: `0` turns agents off, a number caps them (never above the servers' slots), `-1` follows the servers' slots |
+| `slots` | 0 | requests the main server runs at once: `0` is what it reports (llama.cpp), or 4 when it doesn't say |
+| `agentMaxTools` | 45 | tool calls a sub-agent gets; it's told to wrap up at two thirds |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
 | `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |
