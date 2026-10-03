@@ -101,7 +101,7 @@ export function samplingFor(cfg: Config): { key: string; profile: SamplingProfil
 export const HOME = path.join(os.homedir(), ".jcoder");
 export const CONFIG_PATH = process.env.JCODER_CONFIG || path.join(HOME, "config.json");
 
-const DEFAULTS: Config = {
+export const DEFAULTS: Config = {
   baseUrl: "http://127.0.0.1:8080",
   model: "",
   apiKey: "",
@@ -169,4 +169,48 @@ export function saveConfig(cfg: Config): void {
   delete file.thinking;
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(file, null, 2) + "\n");
+}
+
+/** Settings that take effect at once when changed with /setting; the rest at the next start. */
+export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "extraBody", "sampling"]);
+
+const CHOICES: Partial<Record<keyof Config, readonly string[]>> = {
+  effort: EFFORTS,
+  mode: ["ro", "edit", "auto"],
+  dropAdvisors: ["never", "session", "day", "week", "month", "year", "permanent"],
+};
+
+/** The setting a name means: any case, with or without - and _ ("maxagents", "max_agents"). */
+export function settingName(name: string): keyof Config | undefined {
+  const n = name.toLowerCase().replace(/[-_]/g, "");
+  return (Object.keys(DEFAULTS) as (keyof Config)[]).find((k) => k.toLowerCase() === n);
+}
+
+/** A setting's value typed by the user, checked against its kind: a value, or why it won't do. */
+export function parseSetting(key: keyof Config, text: string): { value: unknown } | { error: string } {
+  const def = DEFAULTS[key];
+  const choices = CHOICES[key];
+  if (choices) return choices.includes(text) ? { value: text } : { error: `${key} is one of: ${choices.join(", ")}` };
+  if (typeof def === "boolean") {
+    if (/^(true|on|yes|1)$/i.test(text)) return { value: true };
+    if (/^(false|off|no|0)$/i.test(text)) return { value: false };
+    return { error: `${key} is on or off` };
+  }
+  if (typeof def === "number") {
+    const n = key === "maxAgents" && text === "off" ? 0 : Number(text);
+    if (text === "" || !Number.isFinite(n)) return { error: `${key} is a number` };
+    if (key === "maxAgents" && (!Number.isInteger(n) || n < -1)) return { error: "maxAgents is -1 (the server's slots), 0 (off) or a cap" };
+    if (key === "compactAt" && !(n > 0 && n <= 1)) return { error: "compactAt is a share of the window, above 0 and up to 1 (e.g. 0.85)" };
+    if (key !== "maxAgents" && n <= 0) return { error: `${key} is above 0` };
+    return { value: n };
+  }
+  if (typeof def === "string") return { value: text === '""' ? "" : text };
+  // Lists and objects are written as JSON.
+  try {
+    const v = JSON.parse(text);
+    if (Array.isArray(def) !== Array.isArray(v) || typeof v !== "object" || v === null) throw new Error();
+    return { value: v };
+  } catch {
+    return { error: `${key} is JSON: ${Array.isArray(def) ? "a list, [...]" : "an object, {...}"}` };
+  }
 }

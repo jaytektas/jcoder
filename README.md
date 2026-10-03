@@ -124,6 +124,7 @@ model gets your reason.
 | `/prompt [edit]` | show the system prompt; `edit` makes a copy to change |
 | `/log` | where this conversation's full log is |
 | `/advisors` | test each advisor `ask_model` can use |
+| `/setting [name [value]]` | list the settings, or change one (`/setting maxAgents 3`) |
 | `/update` | check for a new release now |
 | `/help` | everything above |
 
@@ -256,6 +257,10 @@ card usually says what to use (the example is Qwen's advice for coding).
 
 `~/.jcoder/config.json` (or `$JCODER_CONFIG`). It's written with every
 setting and its default on first run, so everything you can change is in it.
+`/setting` changes any of them from inside jcoder and saves it: names in any
+case (`maxagents`), on/off for switches, `""` for empty, JSON for lists and
+objects. Effort, mode, thinking, `maxAgents`, timeouts, `compactAt`,
+`extraBody` and `sampling` apply at once; the rest at the next start.
 
 | key | default | |
 |---|---|---|

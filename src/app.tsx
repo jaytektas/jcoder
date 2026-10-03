@@ -17,7 +17,7 @@ import { Agent, k } from "./agent.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf } from "./client.js";
 import { COMMANDS } from "./complete.js";
-import { EFFORT_BUDGET, EFFORTS, samplingFor, saveConfig, type Config, type Effort, type Mode } from "./config.js";
+import { DEFAULTS, EFFORT_BUDGET, EFFORTS, LIVE_SETTINGS, parseSetting, samplingFor, saveConfig, saveSettings, settingName, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown } from "./markdown.js";
@@ -642,6 +642,58 @@ function App(props: Props) {
       case "ctx":
         notice(a.status());
         break;
+      case "setting":
+      case "settings": {
+        const show = (key: keyof Config, v: unknown = cfg[key]) =>
+          key === "apiKey" && v ? "(set)" : typeof v === "object" ? JSON.stringify(v) : v === "" ? '""' : String(v);
+        const [name, ...words] = arg.split(/\s+/);
+        if (!name) {
+          const keys = Object.keys(DEFAULTS) as (keyof Config)[];
+          const width = Math.max(...keys.map((k) => k.length)) + 2;
+          push({
+            prefix: "  ",
+            marginTop: 1,
+            text: [
+              ...keys.map((k) => ansi.cyan(k.padEnd(width)) + show(k).slice(0, Math.max(20, columns - width - 6))),
+              "",
+              ansi.gray("/setting <name> <value> changes one (lists and objects as JSON)"),
+            ].join("\n"),
+          });
+          break;
+        }
+        const key = settingName(name);
+        if (!key) {
+          notice(`No setting "${name}". /setting lists them.`, "error");
+          break;
+        }
+        if (!words.length) {
+          notice(`${key}: ${show(key)}`);
+          break;
+        }
+        const parsed = parseSetting(key, words.join(" "));
+        if ("error" in parsed) {
+          notice(parsed.error, "error");
+          break;
+        }
+        const value = parsed.value;
+        if (key === "mode") setMode(value as Mode);
+        else if (key === "effort") setEffort(value as Effort);
+        else {
+          saveSettings({ [key]: value });
+          // The rest wait for the next start: changing the server or the
+          // tools in the middle would leave the session out of step.
+          if (LIVE_SETTINGS.has(key)) (cfg as any)[key] = value;
+          if (key === "maxAgents") a.agentsChanged();
+          rerender();
+        }
+        // The tool list is fixed for the session, so an agent tool left out at the start stays out.
+        if (key === "maxAgents" && value !== 0 && !a.tools.some((t) => t.function.name === "agent"))
+          notice(`maxAgents ${value} saved; sub-agents come back at the next start.`);
+        else if (key === "maxAgents" && value === 0) notice("maxAgents 0: sub-agents off.");
+        else if (key === "model") notice(`model ${show(key, value)} saved for the next start; /model switches now.`);
+        else if (key !== "effort") notice(`${key} ${show(key, value)}${LIVE_SETTINGS.has(key) ? "" : " saved; takes effect at the next start"}.`);
+        break;
+      }
       case "sampling": {
         const s = samplingFor(cfg);
         if (!s) {

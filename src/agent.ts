@@ -48,12 +48,13 @@ class Pool {
   private total = 0;
   constructor(
     readonly endpoints: Endpoint[],
-    private max: number,
+    /** Read on every acquire: /setting maxAgents changes it mid-session. */
+    private max: () => number,
   ) {}
   async acquire(signal: AbortSignal): Promise<Endpoint | null> {
     for (;;) {
       if (signal.aborted) return null;
-      const free = this.total < this.max ? this.endpoints.find((e) => e.running < e.slots) : undefined;
+      const free = this.total < this.max() ? this.endpoints.find((e) => e.running < e.slots) : undefined;
       if (free) {
         free.running++;
         this.total++;
@@ -66,6 +67,12 @@ class Pool {
     e.running--;
     this.total--;
     this.waiting.shift()?.();
+  }
+  /** The cap changed: everyone waiting looks again. */
+  wake() {
+    const w = this.waiting;
+    this.waiting = [];
+    w.forEach((r) => r());
   }
 }
 
@@ -170,6 +177,11 @@ export class Agent {
     this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl, maxAgents: cfg.maxAgents }, !!sub);
   }
 
+  /** maxAgents changed: agents waiting for a slot go by the new cap. */
+  agentsChanged(): void {
+    void this.pool?.then((p) => p.wake());
+  }
+
   /** A sub-agent's record goes into its parent's log, marked with its name. */
   private log(event: Record<string, unknown>) {
     if (this.sub) writeLog(this.sub.parent, { ...event, agent: this.sub.description });
@@ -265,12 +277,13 @@ export class Agent {
         endpoints.push({ name: "main", cfg: this.cfg, contextWindow: this.contextWindow, slots: serverInfo(this.cfg.baseUrl).slots ?? 4, running: 0 });
       }
       const slots = endpoints.reduce((n, e) => n + e.slots, 0);
-      return new Pool(endpoints, this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, slots) : slots);
+      return new Pool(endpoints, () => (this.cfg.maxAgents > 0 ? Math.min(this.cfg.maxAgents, slots) : slots));
     })());
   }
 
   /** A sub-agent with a fresh context does `task` and reports back. */
   private async runAgent(description: string, task: string, signal: AbortSignal): Promise<ToolResult> {
+    if (this.cfg.maxAgents === 0) return { content: "Not run: the user has turned sub-agents off. Do the work yourself.", error: true };
     const id = `${this.session.id}-agent${++this.agents}`;
     const pool = await this.buildPool();
     const ep = await pool.acquire(signal);
