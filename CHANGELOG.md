@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.5.1
 
 - **`-c` and `/resume` show the whole conversation** as it was: every
   message in full, tool calls and their results, thinking when shown, even
