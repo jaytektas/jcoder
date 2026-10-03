@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.5.0
 
 - **`/setting`** lists every setting, and `/setting maxAgents 3` changes one
   and saves it. Most apply at once; the server, model and tools at the next
