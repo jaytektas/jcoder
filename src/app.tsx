@@ -13,21 +13,22 @@ import path from "node:path";
 import { Box, Static, Text, render, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
-import { Agent, k } from "./agent.js";
+import { Agent, k, toolLine } from "./agent.js";
 import { prepare } from "./attach.js";
-import { listModels, serverContext, textOf } from "./client.js";
+import { listModels, serverContext, textOf, type ToolCall } from "./client.js";
 import { COMMANDS } from "./complete.js";
 import { DEFAULTS, EFFORT_BUDGET, EFFORTS, LIVE_SETTINGS, parseSetting, samplingFor, saveConfig, saveSettings, settingName, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown } from "./markdown.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
-import { listSessions, logPath, newSession, openSession, title, type Session } from "./session.js";
+import { listSessions, logPath, newSession, openSession, readLog, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
 import { LOGO_WIDTH, logo } from "./logo.js";
 import { ask as askAdvisors, dropped, inactive, PRESETS } from "./advisors.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { AgentStatus, View } from "./view.js";
+import { preview } from "./ui.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
 const MODE_LABEL: Record<Mode, [string, string]> = {
@@ -439,11 +440,45 @@ function App(props: Props) {
 
   const showUser = (text: string) => push(blocks.user(text));
 
+  /**
+   * A resumed conversation, shown as it was: messages, thinking (when shown),
+   * tool calls and their results, from the log, which has everything
+   * including what compaction summarised away. Without a log, from the
+   * messages.
+   */
   const replay = (session: Session) => {
-    for (const m of session.messages.slice(1).filter((m) => (m.role === "user" || m.role === "assistant") && m.content).slice(-6)) {
-      const t = textOf(m.content);
-      if (m.role === "user") showUser(t.length > 800 ? t.slice(0, 800) + "…" : t);
-      else push(blocks.reply(renderMarkdown(t.length > 1500 ? t.slice(0, 1500) + "…" : t), true));
+    let events = readLog(session).filter((e) => !e.agent);
+    if (!events.some((e) => e.type === "user"))
+      events = session.messages.slice(1).map((m) =>
+        m.role === "tool" ? { type: "tool", id: m.tool_call_id, content: m.content } : { type: m.role, ...m },
+      );
+    const calls = new Map<string, ToolCall>();
+    const reply = (t: string) => t.trim() && push(blocks.reply(renderMarkdown(t.trim()), true));
+    for (const e of events) {
+      if (e.type === "user") {
+        // Attached files went to the model, not on the screen.
+        const files: string[] = [];
+        const t = textOf(e.content).replace(/\n\n<file path="([^"]*)">[\s\S]*?\n<\/file>/g, (_: string, f: string) => (files.push(f), ""));
+        showUser(t);
+        if (files.length) push(blocks.result(`attached ${files.join(", ")}`, false));
+      } else if (e.type === "assistant") {
+        if (cfg.showThinking && e.reasoning?.trim()) push(blocks.thought(e.reasoning.trim(), true));
+        reply(e.content ?? "");
+        for (const c of e.tool_calls ?? []) calls.set(c.id, c);
+      } else if (e.type === "tool") {
+        const call = calls.get(e.id);
+        let args: unknown = {};
+        try {
+          args = JSON.parse(call?.function.arguments || "{}");
+        } catch {}
+        const name = e.name ?? call?.function.name ?? "tool";
+        push(blocks.tool(name, toolLine(name, args, session.cwd)));
+        push(blocks.result(e.display ?? preview(textOf(e.content), 6), !!e.error));
+      } else if (e.type === "interrupted") {
+        reply(e.content ?? "");
+        push({ prefix: "  └  ", prefixColor: "red", text: "Interrupted", color: "red" });
+      } else if (e.type === "error") notice(`error: ${e.message}`, "error");
+      else if (e.type === "compact") notice("Compacted: the model sees a summary of everything above.");
     }
   };
 

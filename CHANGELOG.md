@@ -1,5 +1,11 @@
 # Changes
 
+## Unreleased
+
+- **`-c` and `/resume` show the whole conversation** as it was: every
+  message in full, tool calls and their results, thinking when shown, even
+  what compaction summarised. Before, only the last six messages, cut short.
+
 ## 0.5.0
 
 - **`/setting`** lists every setting, and `/setting maxAgents 3` changes one

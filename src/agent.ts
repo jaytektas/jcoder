@@ -43,6 +43,17 @@ interface Endpoint {
  * servers before the main one, never more than `max` agents in all. When
  * everything is busy, callers wait for a release.
  */
+/** A tool call's one-line summary, as shown when it runs. Paths inside the project read shorter relative to it. */
+export function toolLine(name: string, args: any, cwd: string): string {
+  const tool = TOOLS[name];
+  if (!tool) return "";
+  try {
+    return tool.summary(args ?? {}).replaceAll(cwd + "/", "").replaceAll(cwd, ".");
+  } catch {
+    return "";
+  }
+}
+
 class Pool {
   private waiting: (() => void)[] = [];
   private total = 0;
@@ -466,6 +477,7 @@ export class Agent {
         id: call.id,
         name: call.function.name,
         content: storeContent(result.content),
+        display: result.display,
         error: result.error || undefined,
       });
     }
@@ -487,9 +499,7 @@ export class Agent {
       this.view.result("no such tool", true);
       return { content: `There is no tool called ${name}. Tools: ${Object.keys(TOOLS).join(", ")}.`, error: true };
     }
-    // Paths inside the project read shorter relative to it.
-    const cwd = this.session.cwd;
-    this.view.tool(name, tool.summary(args).replaceAll(cwd + "/", "").replaceAll(cwd, "."));
+    this.view.tool(name, toolLine(name, args, this.session.cwd));
     this.view.busy(`Running ${name}`);
 
     let result: ToolResult;

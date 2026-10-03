@@ -71,6 +71,24 @@ export function log(s: Session, event: Record<string, unknown>): void {
   fs.appendFileSync(logPath(s), JSON.stringify({ t: new Date().toISOString(), ...event }) + "\n");
 }
 
+/** The log's events, oldest first; empty when there's no log. A torn last line is skipped. */
+export function readLog(s: Session): Record<string, any>[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(logPath(s), "utf8");
+  } catch {
+    return [];
+  }
+  const events: Record<string, any>[] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch {}
+  }
+  return events;
+}
+
 /** Sessions for this directory, newest first. */
 export function listSessions(cwd: string): Session[] {
   let files: string[];
