@@ -118,6 +118,30 @@ const blocks = {
 const tilde = (p: string) => (process.env.HOME && p.startsWith(process.env.HOME) ? "~" + p.slice(process.env.HOME.length) : p);
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+// One clock for every spinner on screen. A timer each would redraw the screen
+// once per spinner per tick, out of step with each other.
+const spinWatchers = new Set<(f: number) => void>();
+let spinFrame = 0;
+let spinTimer: NodeJS.Timeout | undefined;
+function useSpinFrame(): number {
+  const [frame, setFrame] = useState(spinFrame);
+  useEffect(() => {
+    spinWatchers.add(setFrame);
+    spinTimer ??= setInterval(() => {
+      spinFrame++;
+      for (const w of spinWatchers) w(spinFrame);
+    }, 120);
+    return () => {
+      spinWatchers.delete(setFrame);
+      if (!spinWatchers.size) {
+        clearInterval(spinTimer);
+        spinTimer = undefined;
+      }
+    };
+  }, []);
+  return frame;
+}
+
 interface Item {
   id: number;
   b: Block;
@@ -153,11 +177,7 @@ function bar(fraction: number, width = 20): string {
 }
 
 function Spinner({ label, detail, since, progress }: { label: string; detail: string; since: number; progress?: number }) {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setFrame((f) => f + 1), 120);
-    return () => clearInterval(t);
-  }, []);
+  const frame = useSpinFrame();
   const secs = Math.floor((Date.now() - since) / 1000);
   // One Text, so a narrow terminal wraps the line instead of squashing it.
   return (
@@ -175,11 +195,7 @@ function Spinner({ label, detail, since, progress }: { label: string; detail: st
 
 /** One running sub-agent: what it's for, what it's doing, how long, how many tools. */
 function AgentLine({ st }: { st: AgentStatus }) {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setFrame((f) => f + 1), 120);
-    return () => clearInterval(t);
-  }, []);
+  const frame = useSpinFrame();
   const secs = Math.floor((Date.now() - st.started) / 1000);
   const doing = st.last && st.label.startsWith("Running") ? st.last : [st.label, st.detail].filter(Boolean).join(" · ");
   return (
@@ -883,10 +899,56 @@ function App(props: Props) {
   );
 }
 
+/**
+ * stdout with each frame sent to the terminal in one write. Ink writes a frame
+ * in pieces (erase the old one, then the new one), and a terminal without
+ * synchronized output (VTE, for one) can show the screen between the pieces:
+ * the flicker. Writes are gathered until the code writing them is done.
+ */
+function batchedStdout(): [NodeJS.WriteStream, () => void] {
+  const out = process.stdout;
+  let buf = "";
+  let callbacks: (() => void)[] = [];
+  let queued = false;
+  const flush = () => {
+    queued = false;
+    if (!buf && !callbacks.length) return;
+    const cbs = callbacks;
+    const data = buf;
+    buf = "";
+    callbacks = [];
+    out.write(data, () => cbs.forEach((cb) => cb()));
+  };
+  const write = (chunk: string | Uint8Array, enc?: any, cb?: any) => {
+    if (typeof enc === "function") cb = enc;
+    buf += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    if (cb) callbacks.push(cb);
+    if (!queued) {
+      queued = true;
+      queueMicrotask(flush);
+    }
+    return true;
+  };
+  process.on("exit", flush);
+  const stream = new Proxy(out, {
+    get(target, prop) {
+      if (prop === "write") return write;
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+  return [stream, flush];
+}
+
 export async function runApp(cfg: Config, session: Session, contextWindow: number, resumed: boolean) {
+  const [stdout, flush] = batchedStdout();
   const inst = render(<App cfg={cfg} session={session} contextWindow={contextWindow} resumed={resumed} />, {
+    stdout,
     exitOnCtrlC: false,
+    // Rewrite only the lines that changed, not the whole frame.
+    incrementalRendering: true,
   });
   await inst.waitUntilExit();
+  flush();
   process.stdout.write(`\x1b[90mresume this conversation with: jcoder -c\x1b[0m\n`);
 }

@@ -6,6 +6,8 @@
   fast small model on another box) for sub-agents; each agent goes to the
   first with a free slot, then the main server unless `agentsOnMain` is off.
 - `maxAgents`: cap how many sub-agents run at once, or `0` to turn agents off.
+- No more flicker: only the lines that changed are redrawn, each frame goes
+  to the terminal in one write, and all spinners share one clock.
 
 ## 0.3.0
 
