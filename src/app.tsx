@@ -198,7 +198,11 @@ function Spinner({ label, detail, since, progress }: { label: string; detail: st
 function AgentLine({ st }: { st: AgentStatus }) {
   const frame = useSpinFrame();
   const secs = Math.floor((Date.now() - st.started) / 1000);
-  const doing = st.last && st.label.startsWith("Running") ? st.last : [st.label, st.detail].filter(Boolean).join(" · ");
+  const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  // What it last ran stays on show while it thinks about the result, so
+  // the line says where it is in its work, not just a token count.
+  const now = st.label.startsWith("Running") ? "" : [st.label.toLowerCase(), st.detail].filter(Boolean).join(" ");
+  const doing = [st.last, now].filter(Boolean).join(" · ");
   return (
     <Text wrap="truncate-end">
       <Text color="blue">
@@ -208,7 +212,7 @@ function AgentLine({ st }: { st: AgentStatus }) {
       {st.server && <Text color="cyan"> on {st.server}</Text>}
       <Text color="gray">
         {"  "}
-        {secs}s · {st.tools} tool{st.tools === 1 ? "" : "s"} · {doing}
+        {time} · {st.tools} tool{st.tools === 1 ? "" : "s"} · {doing}
       </Text>
     </Text>
   );

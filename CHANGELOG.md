@@ -1,5 +1,12 @@
 # Changes
 
+## 0.5.2
+
+- **You can see what agents are doing.** Each agent's line keeps its last
+  tool and file on show while it thinks (`read_file src/parser.ts · thinking
+  300 tokens`), and an agent waiting for a free slot says so instead of not
+  showing at all.
+
 ## 0.5.1
 
 - **`-c` and `/resume` show the whole conversation** as it was: every

@@ -104,6 +104,11 @@ class SubView implements View {
     this.st = { description, label: "Starting", detail: "", tools: 0, started: Date.now(), server };
     parent.agentUpdate(id, { ...this.st });
   }
+  /** It got a slot after waiting for one: the clock starts now. */
+  start(server: string) {
+    Object.assign(this.st, { label: "Starting", detail: "", started: Date.now(), server });
+    this.parent.agentUpdate(this.id, { ...this.st });
+  }
   private update() {
     // Tokens stream fast; the status line needn't.
     this.timer ??= setTimeout(() => {
@@ -296,14 +301,21 @@ export class Agent {
   private async runAgent(description: string, task: string, signal: AbortSignal): Promise<ToolResult> {
     if (this.cfg.maxAgents === 0) return { content: "Not run: the user has turned sub-agents off. Do the work yourself.", error: true };
     const id = `${this.session.id}-agent${++this.agents}`;
+    // On screen while it waits for a slot too, so an agent is never invisible.
+    const view = new SubView(this.view, id, description);
+    view.busy("Waiting for a free slot");
     const pool = await this.buildPool();
     const ep = await pool.acquire(signal);
-    if (!ep) return { content: "Not run: the user interrupted.", error: true };
+    if (!ep) {
+      view.close();
+      this.view.agentUpdate(id, null);
+      return { content: "Not run: the user interrupted.", error: true };
+    }
     {
       const cwd = this.session.cwd;
       const session: Session = { id, cwd, model: ep.cfg.model, messages: [{ role: "system", content: agentPrompt(cwd) }], updated: "" };
       const where = ep.name === "main" ? "" : ep.name;
-      const view = new SubView(this.view, id, description, where);
+      view.start(where);
       const agent = new Agent(ep.cfg, session, ep.contextWindow, view, { description, parent: this.session });
       agent.allowed = this.allowed; // "don't ask again" covers its agents too
       const stop = () => agent.stop();
