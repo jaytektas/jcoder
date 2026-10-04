@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.5.4
 
 - **No more running out of memory.** jcoder left waiting (a question, a
   long command) ran the heap out after a few hours: React's development
