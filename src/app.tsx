@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { Box, Static, Text, render, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
+import { Box, Static, Text, render, useApp, useInput, useWindowSize } from "ink";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
 import { Agent, k, toolLine } from "./agent.js";
@@ -141,6 +141,36 @@ function useSpinFrame(): number {
     };
   }, []);
   return frame;
+}
+
+/**
+ * A box's height, kept current as anything inside it changes. Ink's
+ * useBoxMetrics sets state after every frame, changed or not, and React keeps
+ * each of those updates until the component renders again: App waiting at a
+ * question with a spinner going piled up two a frame until the heap ran out.
+ * This sets state only when the height changes. It listens where
+ * useBoxMetrics does, Ink's root node, which calls its layout listeners after
+ * every frame.
+ */
+function useHeight(ref: { current: any }): number | undefined {
+  const [height, setHeight] = useState<number>();
+  const last = useRef<number>(undefined);
+  useEffect(() => {
+    const measure = () => {
+      const h = ref.current?.yogaNode?.getComputedLayout().height;
+      if (h === undefined || h === last.current) return;
+      last.current = h;
+      setHeight(h);
+    };
+    measure();
+    let root = ref.current;
+    while (root?.parentNode) root = root.parentNode;
+    if (root?.nodeName !== "ink-root") return;
+    const listeners: Set<() => void> = (root.internal_layoutListeners ??= new Set());
+    listeners.add(measure);
+    return () => void listeners.delete(measure);
+  }, [ref]);
+  return height;
 }
 
 interface Item {
@@ -284,10 +314,10 @@ function App(props: Props) {
   const maxBudget = Math.max(5, rows - 1);
   const [budget, setBudget] = useState(maxBudget);
   const liveRef = useRef<any>(null);
-  const liveBox = useBoxMetrics(liveRef);
+  const liveHeight = useHeight(liveRef);
   useEffect(() => {
-    if (liveBox.hasMeasured && liveBox.height > budget) setBudget(Math.min(maxBudget, liveBox.height));
-  }, [liveBox.height, liveBox.hasMeasured]);
+    if (liveHeight !== undefined && liveHeight > budget) setBudget(Math.min(maxBudget, liveHeight));
+  }, [liveHeight]);
   const lastRows = useRef(rows);
   useEffect(() => {
     // A taller window has more room below; a shorter one less.

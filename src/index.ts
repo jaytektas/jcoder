@@ -9,6 +9,7 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
+import { restoreNodeEnv } from "./production.js"; // first: before anything loads React
 import { Agent } from "./agent.js";
 import { runApp } from "./app.js";
 import { prepare } from "./attach.js";
@@ -19,6 +20,8 @@ import { setup } from "./setup.js";
 import { listSessions, newSession, openSession } from "./session.js";
 import { VERSION } from "./update.js";
 import { PlainView } from "./view.js";
+
+restoreNodeEnv();
 
 const MODES: Mode[] = ["ro", "edit", "auto"];
 

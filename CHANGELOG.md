@@ -1,5 +1,14 @@
 # Changes
 
+## Unreleased
+
+- **No more running out of memory.** jcoder left waiting (a question, a
+  long command) ran the heap out after a few hours: React's development
+  build kept a timing record for every redraw of the spinner, and the
+  live area's measuring held on to two updates per frame. jcoder now loads
+  React's production build and only measures when the size changes. Your own
+  `NODE_ENV` still reaches the commands it runs.
+
 ## 0.5.3
 
 - **`slots`**: how many requests the main server runs at once. llama.cpp
