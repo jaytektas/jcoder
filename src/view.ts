@@ -35,7 +35,8 @@ export interface View {
   /** The current model message is complete. */
   endMessage(): void;
   tool(name: string, summary: string): void;
-  result(display: string, error: boolean): void;
+  /** `full` is everything the tool returned, for the ctrl+o transcript. */
+  result(display: string, error: boolean, full?: string): void;
   notice(text: string, tone?: "info" | "warn" | "error"): void;
   approve(tool: string, summary: string): Promise<Approval>;
   /** ask_user: the answer, or null if none. */

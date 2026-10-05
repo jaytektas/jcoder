@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Box, Static, Text, render, useApp, useInput, useWindowSize } from "ink";
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
 import { Agent, k, toolLine } from "./agent.js";
 import { prepare } from "./attach.js";
@@ -20,7 +20,7 @@ import { COMMANDS } from "./complete.js";
 import { DEFAULTS, EFFORT_BUDGET, EFFORTS, LIVE_SETTINGS, parseSetting, samplingFor, saveConfig, saveSettings, settingName, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
-import { renderLines, renderMarkdown } from "./markdown.js";
+import { renderLines, renderMarkdown, type CodeState } from "./markdown.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
 import { listSessions, logPath, newSession, openSession, readLog, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
@@ -112,7 +112,15 @@ const blocks = {
   thought: (text: string, first: boolean): Block => ({ prefix: first ? "∴ " : "  ", prefixColor: "gray", text, color: "gray", italic: true, marginTop: first ? 1 : 0 }),
   user: (text: string): Block => ({ prefix: "❯ ", prefixColor: "gray", text, bg: "#303030", marginTop: 1 }),
   tool: (name: string, summary: string): Block => ({ prefix: "● ", prefixColor: "green", text: `${ansi.bold(name)} ${summary.split("\n")[0]}`, marginTop: 1 }),
-  result: (display: string, error: boolean): Block => ({ prefix: "  └  ", prefixColor: "gray", text: display, color: error ? "red" : "gray" }),
+  // A display with its own colours (a diff) keeps them; plain ones are gray.
+  result: (display: string, error: boolean): Block => ({ prefix: "  └  ", prefixColor: "gray", text: display, color: error ? "red" : display.includes("\x1b[") ? undefined : "gray" }),
+  /** A run of quiet tool calls, as one line: "Ran 2 shell commands, read 3 files". */
+  group: (text: string, failed: number): Block => ({
+    prefix: "  ",
+    text: `${text}${failed ? ` · \x1b[31m${failed} failed\x1b[39m` : ""} ${ansi.gray("(ctrl+o to expand)")}`,
+    color: "gray",
+    marginTop: 1,
+  }),
   notice: (text: string, tone: "info" | "warn" | "error"): Block => ({ prefix: "  ", text, color: tone === "error" ? "red" : tone === "warn" ? "yellow" : "gray" }),
 };
 
@@ -271,6 +279,89 @@ function Picker({ title, options, onPick }: { title: string; options: string[]; 
   );
 }
 
+// ---------- quiet tools and the transcript ----------
+
+const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+const times = (n: number) => (n === 1 ? "once" : `${n} times`);
+/** Tools that only look or run: shown as one summary line per run of them, in full under ctrl+o. */
+const QUIET: Record<string, (n: number) => string> = {
+  bash: (n) => `ran ${plural(n, "shell command")}`,
+  bash_output: (n) => `checked a job ${times(n)}`,
+  bash_stop: (n) => `stopped ${plural(n, "job")}`,
+  read_file: (n) => `read ${plural(n, "file")}`,
+  grep: (n) => `searched for ${plural(n, "pattern")}`,
+  glob: (n) => `listed files ${times(n)}`,
+  web_search: (n) => `searched the web ${times(n)}`,
+  web_fetch: (n) => `fetched ${plural(n, "page")}`,
+};
+
+interface Group {
+  counts: Map<string, number>;
+  failed: number;
+}
+
+function groupText(g: Group | null): string {
+  if (!g) return "";
+  const t = [...g.counts].map(([name, n]) => QUIET[name](n)).join(", ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** One tool call as the transcript keeps it. */
+interface Entry {
+  name: string;
+  summary: string;
+  display: string;
+  full: string;
+  error: boolean;
+}
+
+const MAX_ENTRY_LINES = 300;
+
+function transcriptLines(entries: Entry[], width: number): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    out.push("");
+    const [head, ...rest] = e.summary.replace(/\t/g, "    ").split("\n");
+    out.push(...wrapTo(`\x1b[32m●\x1b[39m ${ansi.bold(e.name)} ${head}`, width).split("\n"));
+    for (const l of rest) out.push(...wrapTo(`  ${l}`, width).split("\n"));
+    // Edits and the like show what they showed; the rest everything they returned.
+    const body = (QUIET[e.name] ? e.full : e.display) || "(no output)";
+    const lines = body.replace(/\s+$/, "").replace(/\t/g, "    ").split("\n");
+    const shown = lines.slice(0, MAX_ENTRY_LINES);
+    if (lines.length > MAX_ENTRY_LINES) shown.push(`… ${lines.length - MAX_ENTRY_LINES} more lines`);
+    const bar = e.error ? "\x1b[31m│\x1b[39m " : ansi.gray("│ ");
+    for (const l of shown) for (const row of wrapTo(l, width - 4).split("\n")) out.push(`  ${bar}${e.error ? `\x1b[31m${row}\x1b[39m` : row}`);
+  }
+  return out;
+}
+
+/** Every tool call so far, in full: ctrl+o opens it, scrolled to the end. */
+function Transcript({ entries, rows, columns, running, onClose }: { entries: Entry[]; rows: number; columns: number; running: boolean; onClose(): void }) {
+  const lines = useMemo(() => transcriptLines(entries, Math.max(20, columns - 1)), [entries.length, columns]);
+  const height = Math.max(5, rows - 3);
+  const max = Math.max(0, lines.length - height);
+  const [top, setTop] = useState(max);
+  useInput((input, key) => {
+    if (key.escape || input === "q" || (key.ctrl && input === "o")) onClose();
+    else if (key.upArrow || input === "k") setTop((t) => Math.max(0, t - 1));
+    else if (key.downArrow || input === "j") setTop((t) => Math.min(max, t + 1));
+    else if (key.pageUp || input === "b") setTop((t) => Math.max(0, t - height));
+    else if (key.pageDown || input === " ") setTop((t) => Math.min(max, t + height));
+    else if (key.home || input === "g") setTop(0);
+    else if (key.end || input === "G") setTop(max);
+  });
+  const view = lines.slice(top, top + height);
+  const where = lines.length ? `lines ${top + 1}–${top + view.length} of ${lines.length}` : "no tool calls yet";
+  return (
+    <Box flexDirection="column">
+      <Text>{[...view, ...Array(Math.max(0, height - view.length)).fill("")].join("\n")}</Text>
+      <Text color="gray">
+        {`transcript · ${plural(entries.length, "tool call")} · ${where} · ↑↓ pgup pgdn g G · esc to close${running ? " · still working" : ""}`}
+      </Text>
+    </Box>
+  );
+}
+
 // ---------- the app ----------
 
 interface Props {
@@ -330,10 +421,29 @@ function App(props: Props) {
   }, [rows]);
 
   const nextId = useRef(0);
-  const push = (b: Block) => {
+  const pushRaw = (b: Block) => {
     const height = blockRows(b, columns);
     setBudget((x) => Math.max(0, x - height));
     setItems((xs) => [...xs, { id: nextId.current++, b }]);
+  };
+
+  // Quiet tool calls gather into a group, shown live while it grows and
+  // printed as one line when anything else is printed.
+  const group = useRef<Group | null>(null);
+  const [groupLive, setGroupLive] = useState<{ text: string; current: string } | null>(null);
+  const transcript = useRef<Entry[]>([]);
+  const pending = useRef<{ name: string; summary: string }>({ name: "tool", summary: "" });
+  const [showTranscript, setShowTranscript] = useState(false);
+  const flushGroup = () => {
+    const g = group.current;
+    if (!g) return;
+    group.current = null;
+    setGroupLive(null);
+    pushRaw(blocks.group(groupText(g), g.failed));
+  };
+  const push = (b: Block) => {
+    flushGroup();
+    pushRaw(b);
   };
   const notice = (text: string, tone: "info" | "warn" | "error" = "info") => push(blocks.notice(text, tone));
 
@@ -346,7 +456,7 @@ function App(props: Props) {
     thought: "",
     replyStarted: false,
     thoughtStarted: false,
-    inCode: false,
+    inCode: null as CodeState,
     /** Blank lines held back until more text follows, so a reply never ends in them. */
     blanks: 0,
     pasted: [] as Image[],
@@ -416,16 +526,25 @@ function App(props: Props) {
       flushThought(true);
       flushText(true);
       st.text = st.thought = "";
-      st.replyStarted = st.thoughtStarted = st.inCode = false;
+      st.replyStarted = st.thoughtStarted = false;
+      st.inCode = null;
       st.blanks = 0;
       setLive("");
       setLiveThought("");
     },
     tool(name, summary) {
-      push(blocks.tool(name, summary));
+      pending.current = { name, summary };
+      if (QUIET[name]) setGroupLive({ text: groupText(group.current), current: `${name} ${summary.split("\n")[0]}` });
+      else push(blocks.tool(name, summary));
     },
-    result(display, error) {
-      push(blocks.result(display, error));
+    result(display, error, full) {
+      const { name, summary } = pending.current;
+      transcript.current.push({ name, summary, display, full: full ?? display, error });
+      if (!QUIET[name]) return push(blocks.result(display, error));
+      const g = (group.current ??= { counts: new Map(), failed: 0 });
+      g.counts.set(name, (g.counts.get(name) ?? 0) + 1);
+      if (error) g.failed++;
+      setGroupLive({ text: groupText(g), current: "" });
     },
     notice,
     approve(tool, summary) {
@@ -510,14 +629,15 @@ function App(props: Props) {
           args = JSON.parse(call?.function.arguments || "{}");
         } catch {}
         const name = e.name ?? call?.function.name ?? "tool";
-        push(blocks.tool(name, toolLine(name, args, session.cwd)));
-        push(blocks.result(e.display ?? preview(textOf(e.content), 6), !!e.error));
+        view.tool(name, toolLine(name, args, session.cwd));
+        view.result(e.display ?? preview(textOf(e.content), 6), !!e.error, textOf(e.content));
       } else if (e.type === "interrupted") {
         reply(e.content ?? "");
         push({ prefix: "  └  ", prefixColor: "red", text: "Interrupted", color: "red" });
       } else if (e.type === "error") notice(`error: ${e.message}`, "error");
       else if (e.type === "compact") notice("Compacted: the model sees a summary of everything above.");
     }
+    flushGroup();
   };
 
   // Banner, once.
@@ -648,6 +768,7 @@ function App(props: Props) {
             ansi.gray("ctrl+v         paste an image from the clipboard"),
             ansi.gray("\\ + enter      new line (alt+enter and ctrl+j too)"),
             ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking"),
+            ansi.gray("ctrl+o         every tool call in full (the transcript)"),
             ansi.gray("esc            close /btw, else stop the model · ctrl+d quit"),
             ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
           ].join("\n"),
@@ -885,6 +1006,8 @@ function App(props: Props) {
 
   // App-wide keys. The editor handles typing.
   useInput((input, key) => {
+    if (transcriptOpen) return; // it has the keys
+    if (key.ctrl && input === "o") return setShowTranscript(true);
     if (key.escape && btw && !ask && !pick && !question) {
       btw.stop.abort();
       setBtw(null);
@@ -907,7 +1030,9 @@ function App(props: Props) {
   };
   const [modeColor, modeText] = MODE_LABEL[cfg.mode];
   const a = agentRef.current;
-  const editorActive = !pick && !ask && !question;
+  // A question or permission prompt takes over from the transcript.
+  const transcriptOpen = showTranscript && !pick && !ask && !question;
+  const editorActive = !pick && !ask && !question && !transcriptOpen;
   const openTodos = todos.some((t) => t.status !== "done") ? todos : [];
   const runningJobs = a.jobs.list().filter((j) => !j.exit).length;
 
@@ -918,9 +1043,24 @@ function App(props: Props) {
       <Box flexDirection="column" justifyContent="flex-end" minHeight={Math.min(budget, maxBudget)}>
       {/* Measured without the padding around it: only real content growing past the budget grows it. */}
       <Box ref={liveRef} flexDirection="column">
+      {transcriptOpen && (
+        <Transcript entries={transcript.current} rows={rows} columns={columns} running={a.running} onClose={() => setShowTranscript(false)} />
+      )}
+      <Box flexDirection="column" display={transcriptOpen ? "none" : "flex"}>
+
+      {groupLive && (groupLive.text || groupLive.current) && (
+        <BlockView
+          b={{
+            prefix: "  ",
+            text: [groupLive.text, groupLive.current && ansi.gray(`└ ${groupLive.current.slice(0, Math.max(20, columns - 8))}`)].filter(Boolean).join("\n"),
+            color: "gray",
+            marginTop: 1,
+          }}
+        />
+      )}
 
       {liveThought && <BlockView b={blocks.thought(fit(liveThought), !s.current.thoughtStarted)} />}
-      {live && <BlockView b={blocks.reply(fit(s.current.inCode ? renderLines(live, true)[0] : live), !s.current.replyStarted)} />}
+      {live && <BlockView b={blocks.reply(fit(s.current.inCode !== null ? renderLines(live, s.current.inCode)[0] : live), !s.current.replyStarted)} />}
       {agents.size > 0 && (
         <Box flexDirection="column" marginTop={1}>
           {[...agents.entries()].map(([id, st]) => (
@@ -1071,6 +1211,7 @@ function App(props: Props) {
             {cfg.effort !== "off" ? (cfg.showThinking ? " · thoughts shown" : " · thoughts hidden") : ""}
           </Text>
         </Box>
+      </Box>
       </Box>
       </Box>
       </Box>

@@ -18,6 +18,7 @@ import { isImagePath, kb, loadImage } from "./images.js";
 import type { Jobs } from "./jobs.js";
 import { webFetch, webSearch } from "./web.js";
 import { c } from "./ui.js";
+import { highlightLine, langOf } from "./highlight.js";
 
 export interface ToolResult {
   /** What the model sees. */
@@ -125,12 +126,60 @@ function checkSeen(ctx: ToolContext, abs: string): string | null {
   return null;
 }
 
-function diffPreview(oldText: string, newText: string, maxLines = 12): string {
-  const minus = oldText.split("\n").map((l) => c.red(`- ${l}`));
-  const plus = newText.split("\n").map((l) => c.green(`+ ${l}`));
-  const clip = (a: string[]) =>
-    a.length > maxLines ? [...a.slice(0, maxLines), c.gray(`  … ${a.length - maxLines} more`)] : a;
-  return [...clip(minus), ...clip(plus)].join("\n");
+const E = "\x1b[";
+const tty = process.stdout.isTTY;
+const bg = (n: number) => (t: string) => (tty ? `${E}48;5;${n}m${t}${E}49m` : t);
+const RED_BG = bg(52);
+const GREEN_BG = bg(22);
+const grayFg = (t: string) => (tty ? `${E}90m${t}${E}39m` : t);
+
+/**
+ * An edit as a diff: changed lines with their line numbers on red and green,
+ * a few unchanged ones around them, all syntax-coloured.
+ */
+function diffView(before: string, at: number, oldS: string, newS: string, file: string, count = 1, context = 3, maxLines = 30): string {
+  const lang = langOf(file);
+  const lineStart = before.lastIndexOf("\n", at - 1) + 1;
+  const endIdx = at + oldS.length;
+  let lineEnd = before.indexOf("\n", endIdx);
+  if (lineEnd < 0) lineEnd = before.length;
+  let oldL = before.slice(lineStart, lineEnd).split("\n");
+  let newL = (before.slice(lineStart, at) + newS + before.slice(endIdx, lineEnd)).split("\n");
+  let first = before.slice(0, lineStart).split("\n").length; // 1-based number of oldL[0]
+  // Only the lines that really changed.
+  while (oldL.length && newL.length && oldL[0] === newL[0]) (oldL.shift(), newL.shift(), first++);
+  while (oldL.length && newL.length && oldL[oldL.length - 1] === newL[newL.length - 1]) (oldL.pop(), newL.pop());
+  const all = before.split("\n");
+  const delta = newL.length - oldL.length;
+  const lastNum = first + Math.max(oldL.length, newL.length) + context + Math.max(0, delta);
+  const w = String(lastNum).length;
+  const width = Math.max(40, (process.stdout.columns || 100) - 7);
+  const row = (num: number | string, sign: string, text: string, paint?: (t: string) => string) => {
+    const plain = `${String(num).padStart(w)} ${sign} ${text}`;
+    const shown = `${grayFg(String(num).padStart(w))} ${sign} ${highlightLine(text, lang)}`;
+    return paint ? paint(shown + " ".repeat(Math.max(0, width - plain.length))) : shown;
+  };
+  const clip = (lines: string[], start: number, sign: string, paint: (t: string) => string) => {
+    const out = lines.slice(0, maxLines).map((l, i) => row(start + i, sign, l, paint));
+    if (lines.length > maxLines) out.push(grayFg(`${" ".repeat(w)}   … ${lines.length - maxLines} more`));
+    return out;
+  };
+  const out: string[] = [grayFg(`+${newL.length} -${oldL.length}${count > 1 ? ` in each of ${count} places (the first shown)` : ""}`)];
+  for (let n = Math.max(1, first - context); n < first; n++) out.push(row(n, " ", all[n - 1] ?? ""));
+  out.push(...clip(oldL, first, "-", RED_BG), ...clip(newL, first, "+", GREEN_BG));
+  const after = first + oldL.length; // old numbering
+  for (let n = after; n < after + context && n <= all.length; n++) out.push(row(n + delta, " ", all[n - 1] ?? ""));
+  return out.join("\n");
+}
+
+/** The first lines of a new file, numbered and coloured. */
+function filePreview(text: string, file: string, maxLines = 8): string {
+  const lang = langOf(file);
+  const lines = text.replace(/\n$/, "").split("\n");
+  const w = String(Math.min(lines.length, maxLines)).length;
+  const out = lines.slice(0, maxLines).map((l, i) => `${grayFg(String(i + 1).padStart(w))}   ${highlightLine(l.length > 300 ? l.slice(0, 300) + "…" : l, lang)}`);
+  if (lines.length > maxLines) out.push(grayFg(`${" ".repeat(w)}   … ${lines.length - maxLines} more lines`));
+  return out.join("\n");
 }
 
 const readFile: Tool = {
@@ -211,7 +260,10 @@ const writeFile: Tool = {
     fs.writeFileSync(abs, content);
     ctx.seen.set(abs, mtime(abs));
     const n = content.split("\n").length;
-    return { content: `${existed ? "Overwrote" : "Created"} ${rel(ctx, abs)} (${n} lines).`, display: `${n} line${n === 1 ? "" : "s"}` };
+    return {
+      content: `${existed ? "Overwrote" : "Created"} ${rel(ctx, abs)} (${n} lines).`,
+      display: `${existed ? "Overwrote" : "Wrote"} ${n} line${n === 1 ? "" : "s"}\n${filePreview(content, abs)}`,
+    };
   },
 };
 
@@ -278,7 +330,7 @@ const editFile: Tool = {
     const line = text.slice(0, text.indexOf(oldS)).split("\n").length;
     return {
       content: `Edited ${rel(ctx, abs)}${count > 1 ? ` (${count} places)` : ` at line ${line}`}.`,
-      display: diffPreview(oldS, newS),
+      display: diffView(text, text.indexOf(oldS), oldS, newS, abs, count),
     };
   },
 };

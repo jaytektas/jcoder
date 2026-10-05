@@ -12,12 +12,14 @@
  * Just enough markdown for terminal replies: headings, lists, quotes, code
  * blocks, **bold**, *italic*, `code`. Returns ANSI-styled text.
  */
+import { highlightLine, langOf } from "./highlight.js";
+
 const E = "\x1b[";
 const bold = (s: string) => `${E}1m${s}${E}22m`;
 const italic = (s: string) => `${E}3m${s}${E}23m`;
 const code = (s: string) => `${E}38;5;147m${s}${E}39m`; // soft lavender
 const dim = (s: string) => `${E}2m${s}${E}22m`;
-const block = (s: string) => `${E}38;5;180m${s}${E}39m`;
+const heading = (s: string) => `${E}1m${E}38;5;214m${s}${E}39m${E}22m`;
 
 function inline(s: string): string {
   // Code spans first, so their contents aren't styled further.
@@ -35,23 +37,27 @@ function inline(s: string): string {
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => spans[Number(i)]);
 }
 
+/** Inside a code block: its language ("" when the fence names none). Outside: null. */
+export type CodeState = string | null;
+
 /**
  * Renders complete lines. Pass the code-block state from the previous call
  * when rendering a stream piece by piece; the new state comes back.
  */
-export function renderLines(text: string, inCode = false): [string, boolean] {
+export function renderLines(text: string, inCode: CodeState = null): [string, CodeState] {
   const out: string[] = [];
   for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      inCode = !inCode;
+    let f: RegExpExecArray | null;
+    if ((f = /^\s*(?:```|~~~)\s*([\w+#.-]*)/.exec(line))) {
+      inCode = inCode === null ? langOf(f[1]) : null;
       continue;
     }
-    if (inCode) {
-      out.push(block("  " + line));
+    if (inCode !== null) {
+      out.push("  " + highlightLine(line, inCode || "code"));
       continue;
     }
     let m: RegExpExecArray | null;
-    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) out.push(bold(inline(m[2])));
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) out.push(heading(inline(m[2])));
     else if ((m = /^(\s*)[-*+]\s+(.*)$/.exec(line))) out.push(`${m[1]}• ${inline(m[2])}`);
     else if ((m = /^(\s*)(\d+)[.)]\s+(.*)$/.exec(line))) out.push(`${m[1]}${m[2]}. ${inline(m[3])}`);
     else if ((m = /^>\s?(.*)$/.exec(line))) out.push(dim("│ ") + italic(inline(m[1])));

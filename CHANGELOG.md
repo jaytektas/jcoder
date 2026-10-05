@@ -1,5 +1,25 @@
 # Changes
 
+## 0.5.13
+
+- **Quiet tool calls fold into one line.** Commands, file reads, searches
+  and web lookups no longer print one by one with their output. A run of
+  them shows as a single line, such as `Ran 2 shell commands, read 3
+  files (ctrl+o to expand)`, with failures counted in red. While they run,
+  the command in progress shows below it. Edits, writes, to-dos and
+  questions still show in full.
+- **ctrl+o opens the transcript:** every tool call this session with its
+  full command and everything it returned, scrolled to the end. Scroll
+  with ↑↓, pgup/pgdn and g/G; esc, q or ctrl+o closes it. A resumed
+  conversation's earlier calls are in it too.
+- **Edits show as a real diff:** only the lines that changed, with their
+  line numbers and three lines around them, removed lines on red and
+  added on green, with an exact `+added -removed` count. New files show
+  their first lines.
+- **Syntax colours** for diffs, new-file previews and code blocks in
+  replies (comments, strings, numbers, keywords, type names). Headings
+  are coloured too.
+
 ## 0.5.12
 
 - **Resuming picks up the current system prompt.** `jcoder -c` and

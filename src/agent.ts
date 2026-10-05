@@ -590,7 +590,7 @@ export class Agent {
         result = { content: `${name} failed: ${e.message}`, error: true };
       }
     }
-    this.view.result(result.display ?? preview(textOf(result.content), 6), !!result.error);
+    this.view.result(result.display ?? preview(textOf(result.content), 6), !!result.error, textOf(result.content));
 
     this.calls++;
     const target = args.path ?? args.command ?? args.url ?? args.pattern;
