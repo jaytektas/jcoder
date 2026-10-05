@@ -1,5 +1,25 @@
 # Changes
 
+## 0.6.0
+
+- **jcoder now draws the whole window, like Claude Code's fullscreen
+  renderer.** It keeps the conversation itself instead of printing it
+  into the terminal's scrollback, so the window size is up to you and:
+  - the **wheel** scrolls the conversation, as do **PgUp/PgDn**. When
+    you're scrolled up, a **Jump to bottom (ctrl+End) ↓** pill shows,
+    and sending a message goes back to the bottom;
+  - **clicking** a `Ran 2 shell commands, read 3 files (click to
+    expand)` line opens it in place, showing each command with the
+    start of its output. Click again to close it. ctrl+o still shows
+    everything;
+  - **dragging** selects text, and letting go copies it to the
+    clipboard (wl-copy, xclip or xsel, else the terminal). Shift+drag
+    gives the terminal's own selection.
+
+  The terminal is restored on exit, including on a crash or a kill.
+  `"fullscreen": false` in `~/.jcoder/config.json` brings back the old
+  scrollback mode.
+
 ## 0.5.13
 
 - **Quiet tool calls fold into one line.** Commands, file reads, searches

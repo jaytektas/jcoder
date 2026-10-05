@@ -21,6 +21,7 @@ import { DEFAULTS, EFFORT_BUDGET, EFFORTS, LIVE_SETTINGS, parseSetting, sampling
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
 import { renderLines, renderMarkdown, type CodeState } from "./markdown.js";
+import { copyToClipboard, invertColumns, mouseStdin, restoreTerminal, stripAnsi, type Mouse } from "./screen.js";
 import { DEFAULT_TEMPLATE, notes, systemPrompt, templatePath, USER_TEMPLATE } from "./prompt.js";
 import { listSessions, logPath, newSession, openSession, readLog, title, type Session } from "./session.js";
 import type { Approval, Todo } from "./tools.js";
@@ -115,9 +116,9 @@ const blocks = {
   // A display with its own colours (a diff) keeps them; plain ones are gray.
   result: (display: string, error: boolean): Block => ({ prefix: "  └  ", prefixColor: "gray", text: display, color: error ? "red" : display.includes("\x1b[") ? undefined : "gray" }),
   /** A run of quiet tool calls, as one line: "Ran 2 shell commands, read 3 files". */
-  group: (text: string, failed: number): Block => ({
+  group: (text: string, failed: number, hint = "ctrl+o to expand"): Block => ({
     prefix: "  ",
-    text: `${text}${failed ? ` · \x1b[31m${failed} failed\x1b[39m` : ""} ${ansi.gray("(ctrl+o to expand)")}`,
+    text: `${text}${failed ? ` · \x1b[31m${failed} failed\x1b[39m` : ""} ${ansi.gray(`(${hint})`)}`,
     color: "gray",
     marginTop: 1,
   }),
@@ -184,6 +185,19 @@ function useHeight(ref: { current: any }): number | undefined {
 interface Item {
   id: number;
   b: Block;
+  /** A summary line of quiet tool calls: what clicking it opens. */
+  entries?: Entry[];
+}
+
+/** A place in the app-drawn screen's lines. */
+interface Pos {
+  line: number;
+  col: number;
+}
+
+/** Where the app-drawn screen hands mouse reports: the app sets the handler. */
+interface MouseBus {
+  handler(m: Mouse): void;
 }
 
 interface Pick {
@@ -279,6 +293,62 @@ function Picker({ title, options, onPick }: { title: string; options: string[]; 
   );
 }
 
+// ---------- the app-drawn screen ----------
+
+const FG: Record<string, number> = { gray: 90, red: 31, green: 32, yellow: 33, blue: 34, magenta: 35, cyan: 36 };
+const hexBg = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `\x1b[48;2;${(n >> 16) & 255};${(n >> 8) & 255};${n & 255}m`;
+};
+
+/** One line in a block's colours, as BlockView would draw it. */
+function paint(line: string, b: { color?: string; italic?: boolean; bg?: string }, width?: number): string {
+  let out = line;
+  if (b.color && FG[b.color]) out = `\x1b[${FG[b.color]}m${out}\x1b[39m`;
+  if (b.italic) out = `\x1b[3m${out}\x1b[23m`;
+  if (b.bg) {
+    const pad = width ? Math.max(0, width - [...stripAnsi(line)].length) : 0;
+    out = `${hexBg(b.bg)}${out}${" ".repeat(pad)}\x1b[49m`;
+  }
+  return out;
+}
+
+/** A block as finished screen lines: margin, prefix, wrapped and coloured text. */
+function blockLines(b: Block, columns: number): string[] {
+  const pw = prefixWidth(b);
+  const width = textWidth(columns, pw);
+  const rows = wrapTo(b.text, width).split("\n");
+  const out: string[] = Array(b.marginTop ?? 0).fill("");
+  rows.forEach((r, i) => {
+    const prefix = i === 0 ? b.prefix ?? "" : " ".repeat(pw);
+    const pre = prefix ? paint(prefix, { color: b.prefixColor, bg: b.bg }) : "";
+    out.push(pre + paint(r, b, b.bg ? width : undefined));
+  });
+  return out;
+}
+
+/** An opened summary line: each call with the start of its output. */
+function groupLines(b: Block, entries: Entry[], columns: number): string[] {
+  const out = blockLines({ ...b, text: b.text.replace(/\(click to expand\)/, "(click to collapse)") }, columns);
+  const width = Math.max(20, columns - 1);
+  for (const e of entries) {
+    const [head, ...rest] = e.summary.replace(/\t/g, "    ").split("\n");
+    out.push(...wrapTo(`  \x1b[32m●\x1b[39m ${ansi.bold(e.name)} ${head}`, width).split("\n"));
+    for (const l of rest.slice(0, 6)) out.push(...wrapTo(`      ${l}`, width).split("\n"));
+    if (rest.length > 6) out.push(ansi.gray(`      … ${rest.length - 6} more lines of command`));
+    const body = (e.full || "(no output)").replace(/\s+$/, "").replace(/\t/g, "    ").split("\n");
+    const shown = body.slice(0, GROUP_LINES);
+    const bar = e.error ? "\x1b[31m└\x1b[39m " : ansi.gray("└ ");
+    shown.forEach((l, i) => {
+      for (const row of wrapTo(l, width - 6).split("\n")) out.push(`    ${i === 0 ? bar : "  "}${e.error ? `\x1b[31m${row}\x1b[39m` : ansi.gray(row)}`);
+    });
+    if (body.length > GROUP_LINES) out.push(ansi.gray(`      … ${body.length - GROUP_LINES} more lines (ctrl+o shows everything)`));
+  }
+  return out;
+}
+
+const GROUP_LINES = 12;
+
 // ---------- quiet tools and the transcript ----------
 
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
@@ -298,6 +368,7 @@ const QUIET: Record<string, (n: number) => string> = {
 interface Group {
   counts: Map<string, number>;
   failed: number;
+  entries: Entry[];
 }
 
 function groupText(g: Group | null): string {
@@ -369,10 +440,13 @@ interface Props {
   session: Session;
   contextWindow: number;
   resumed: boolean;
+  /** Set when jcoder draws the whole window (the fullscreen setting). */
+  mouse?: MouseBus;
 }
 
 function App(props: Props) {
   const { cfg } = props;
+  const appDrawn = !!props.mouse;
   const { exit } = useApp();
   const { columns, rows } = useWindowSize();
   const [items, setItems] = useState<Item[]>([]);
@@ -421,10 +495,10 @@ function App(props: Props) {
   }, [rows]);
 
   const nextId = useRef(0);
-  const pushRaw = (b: Block) => {
+  const pushRaw = (b: Block, entries?: Entry[]) => {
     const height = blockRows(b, columns);
     setBudget((x) => Math.max(0, x - height));
-    setItems((xs) => [...xs, { id: nextId.current++, b }]);
+    setItems((xs) => [...xs, { id: nextId.current++, b, entries }]);
   };
 
   // Quiet tool calls gather into a group, shown live while it grows and
@@ -439,7 +513,7 @@ function App(props: Props) {
     if (!g) return;
     group.current = null;
     setGroupLive(null);
-    pushRaw(blocks.group(groupText(g), g.failed));
+    pushRaw(blocks.group(groupText(g), g.failed, appDrawn ? "click to expand" : undefined), g.entries);
   };
   const push = (b: Block) => {
     flushGroup();
@@ -539,9 +613,11 @@ function App(props: Props) {
     },
     result(display, error, full) {
       const { name, summary } = pending.current;
-      transcript.current.push({ name, summary, display, full: full ?? display, error });
+      const entry = { name, summary, display, full: full ?? display, error };
+      transcript.current.push(entry);
       if (!QUIET[name]) return push(blocks.result(display, error));
-      const g = (group.current ??= { counts: new Map(), failed: 0 });
+      const g = (group.current ??= { counts: new Map(), failed: 0, entries: [] as Entry[] });
+      g.entries.push(entry);
       g.counts.set(name, (g.counts.get(name) ?? 0) + 1);
       if (error) g.failed++;
       setGroupLive({ text: groupText(g), current: "" });
@@ -769,6 +845,12 @@ function App(props: Props) {
             ansi.gray("\\ + enter      new line (alt+enter and ctrl+j too)"),
             ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking"),
             ansi.gray("ctrl+o         every tool call in full (the transcript)"),
+            ...(appDrawn
+              ? [
+                  ansi.gray("mouse          wheel scrolls · click a summary line to open it · drag to select and copy"),
+                  ansi.gray("pgup/pgdn      scroll · ctrl+end back to the bottom · shift+drag: the terminal's own selection"),
+                ]
+              : []),
             ansi.gray("esc            close /btw, else stop the model · ctrl+d quit"),
             ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
           ].join("\n"),
@@ -992,6 +1074,7 @@ function App(props: Props) {
 
   const onSubmit = (text: string) => {
     setExitArmed(false);
+    setPinTop(null); // back to the bottom, where the answer will come
     const line = text.trim();
     if (line.startsWith("/") && !line.includes("\n")) {
       if (agentRef.current.running && !/^\/(btw|thoughts|mode|ctx|log|help)\b/.test(line)) {
@@ -1004,10 +1087,127 @@ function App(props: Props) {
     setQueue((q) => [...q, line]);
   };
 
+  // ---------- the app-drawn screen ----------
+  // Every item becomes finished lines; the window shows a slice of them.
+  // Following the bottom unless scrolled up (pinTop: the first line shown).
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [pinTop, setPinTop] = useState<number | null>(null);
+  const [sel, setSel] = useState<{ a: Pos; b: Pos } | null>(null);
+  const [flash, setFlash] = useState("");
+  const viewBox = useRef<any>(null);
+  const viewH = Math.max(1, useHeight(viewBox) ?? rows - 6);
+  const lineCache = useRef(new Map<number, { w: number; open: boolean; lines: string[] }>());
+  const flat = useMemo(() => {
+    const lines: string[] = [];
+    const owner: number[] = [];
+    if (!appDrawn) return { lines, owner };
+    items.forEach((it, idx) => {
+      const open = expanded.has(it.id) && !!it.entries;
+      let c = lineCache.current.get(it.id);
+      if (!c || c.w !== columns || c.open !== open) {
+        c = { w: columns, open, lines: open ? groupLines(it.b, it.entries!, columns) : blockLines(it.b, columns) };
+        lineCache.current.set(it.id, c);
+      }
+      for (const l of c.lines) {
+        lines.push(l);
+        owner.push(idx);
+      }
+    });
+    return { lines, owner };
+  }, [appDrawn, items, columns, expanded]);
+  const total = flat.lines.length;
+  const bottomTop = Math.max(0, total - viewH);
+  const top = pinTop === null ? bottomTop : Math.max(0, Math.min(pinTop, bottomTop));
+  const atBottom = top >= bottomTop;
+  const scrollBy = (n: number) => {
+    const t = Math.max(0, top + n);
+    setPinTop(t >= bottomTop ? null : t);
+  };
+  const toBottom = () => setPinTop(null);
+
+  const visible = (() => {
+    if (!appDrawn) return "";
+    const out = flat.lines.slice(top, top + viewH);
+    if (sel) {
+      const [a, b] = sel.a.line < sel.b.line || (sel.a.line === sel.b.line && sel.a.col <= sel.b.col) ? [sel.a, sel.b] : [sel.b, sel.a];
+      for (let i = Math.max(a.line, top); i <= Math.min(b.line, top + out.length - 1); i++)
+        out[i - top] = invertColumns(out[i - top], i === a.line ? a.col : 0, i === b.line ? b.col + 1 : columns);
+    }
+    while (out.length < viewH) out.push("");
+    if (!atBottom) {
+      const pill = " Jump to bottom (ctrl+End) ↓ ";
+      out[out.length - 1] = " ".repeat(Math.max(0, Math.floor((columns - pill.length) / 2))) + `\x1b[7m${pill}\x1b[27m`;
+    }
+    return out.join("\n");
+  })();
+
+  const selectedText = (a: Pos, b: Pos) => {
+    if (a.line > b.line || (a.line === b.line && a.col > b.col)) [a, b] = [b, a];
+    return flat.lines
+      .slice(a.line, b.line + 1)
+      .map((l, i) => {
+        const chars = [...stripAnsi(l)];
+        return chars.slice(i === 0 ? a.col : 0, a.line + i === b.line ? b.col + 1 : chars.length).join("").replace(/\s+$/, "");
+      })
+      .join("\n");
+  };
+
+  // Mouse: the wheel scrolls; a click opens or closes a summary line; a drag
+  // selects, and letting go copies it.
+  const drag = useRef<{ from: Pos; moved: boolean } | null>(null);
+  const onMouse = (m: Mouse) => {
+    if (transcriptOpen) return;
+    if (m.kind === "wheel") return scrollBy(m.button * 3);
+    if (m.button !== 0) return;
+    const y = Math.max(0, Math.min(viewH - 1, m.y));
+    const at: Pos = { line: top + y, col: m.x };
+    if (m.kind === "press") {
+      drag.current = { from: at, moved: false };
+      setSel(null);
+    } else if (m.kind === "drag" && drag.current) {
+      drag.current.moved = true;
+      setSel({ a: drag.current.from, b: at });
+      if (m.y <= 0) scrollBy(-1);
+      else if (m.y >= viewH - 1) scrollBy(1);
+    } else if (m.kind === "release" && drag.current) {
+      const d = drag.current;
+      drag.current = null;
+      if (d.moved) {
+        const text = selectedText(d.from, at);
+        if (text.trim() && copyToClipboard(text)) {
+          setFlash(`copied ${text.length} character${text.length === 1 ? "" : "s"}`);
+          setTimeout(() => setFlash(""), 2500);
+        }
+      } else if (m.y < viewH && !atBottom && m.y === viewH - 1) {
+        toBottom(); // the pill
+      } else if (m.y < viewH && at.line < total) {
+        const it = items[flat.owner[at.line]];
+        if (it?.entries) {
+          // Opened in place: the view holds still and it unfolds below.
+          setPinTop(top);
+          setExpanded((e) => {
+            const n = new Set(e);
+            if (!n.delete(it.id)) n.add(it.id);
+            return n;
+          });
+        }
+      }
+    }
+  };
+  const onMouseRef = useRef(onMouse);
+  onMouseRef.current = onMouse;
+  useEffect(() => {
+    if (props.mouse) props.mouse.handler = (m) => onMouseRef.current(m);
+  }, []);
+
   // App-wide keys. The editor handles typing.
   useInput((input, key) => {
     if (transcriptOpen) return; // it has the keys
     if (key.ctrl && input === "o") return setShowTranscript(true);
+    if (appDrawn && key.pageUp) return scrollBy(-Math.max(1, viewH - 2));
+    if (appDrawn && key.pageDown) return scrollBy(Math.max(1, viewH - 2));
+    if (appDrawn && key.ctrl && key.end) return toBottom();
+    if (appDrawn && key.ctrl && key.home) return setPinTop(0);
     if (key.escape && btw && !ask && !pick && !question) {
       btw.stop.abort();
       setBtw(null);
@@ -1038,11 +1238,16 @@ function App(props: Props) {
 
   return (
     <Width.Provider value={columns}>
-      <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>
+      {!appDrawn && <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>}
 
-      <Box flexDirection="column" justifyContent="flex-end" minHeight={Math.min(budget, maxBudget)}>
+      <Box flexDirection="column" justifyContent="flex-end" {...(appDrawn ? { height: rows } : { minHeight: Math.min(budget, maxBudget) })}>
+      {appDrawn && (
+        <Box ref={viewBox} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden" display={transcriptOpen ? "none" : "flex"}>
+          <Text>{visible}</Text>
+        </Box>
+      )}
       {/* Measured without the padding around it: only real content growing past the budget grows it. */}
-      <Box ref={liveRef} flexDirection="column">
+      <Box ref={liveRef} flexDirection="column" flexShrink={0}>
       {transcriptOpen && (
         <Transcript entries={transcript.current} rows={rows} columns={columns} running={a.running} onClose={() => setShowTranscript(false)} />
       )}
@@ -1198,6 +1403,8 @@ function App(props: Props) {
           <Text>
             {exitArmed ? (
               <Text color="yellow">press ctrl+c again to quit</Text>
+            ) : flash ? (
+              <Text color="green">{flash}</Text>
             ) : (
               <>
                 <Text color={modeColor}>{modeText}</Text>
@@ -1262,13 +1469,20 @@ function batchedStdout(): [NodeJS.WriteStream, () => void] {
 
 export async function runApp(cfg: Config, session: Session, contextWindow: number, resumed: boolean) {
   const [stdout, flush] = batchedStdout();
-  const inst = render(<App cfg={cfg} session={session} contextWindow={contextWindow} resumed={resumed} />, {
+  const fullscreen = cfg.fullscreen && !!process.stdout.isTTY && !!process.stdin.isTTY;
+  // Mouse reports go to whichever handler the app has set.
+  const mouse: MouseBus = { handler: () => {} };
+  const stdin = fullscreen ? mouseStdin((m) => mouse.handler(m)) : undefined;
+  const inst = render(<App cfg={cfg} session={session} contextWindow={contextWindow} resumed={resumed} mouse={fullscreen ? mouse : undefined} />, {
     stdout,
+    ...(stdin ? { stdin } : {}),
     exitOnCtrlC: false,
     // Rewrite only the lines that changed, not the whole frame.
     incrementalRendering: true,
+    alternateScreen: fullscreen,
   });
   await inst.waitUntilExit();
   flush();
+  if (fullscreen) restoreTerminal();
   process.stdout.write(`\x1b[90mresume this conversation with: jcoder -c\x1b[0m\n`);
 }

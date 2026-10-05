@@ -49,6 +49,8 @@ export interface Config {
   dropAdvisors: DropPolicy;
   /** Look for new releases on GitHub (at most once a day) and offer to install them. */
   checkUpdates: boolean;
+  /** Draw the whole window (scroll, click to expand, select to copy) rather than print into the terminal's scrollback. */
+  fullscreen: boolean;
   /** Other servers to run sub-agents on (say a fast small model on another machine), tried before the main one. */
   agentServers: AgentServer[];
   /** Run sub-agents on the main server too, when the agent servers are busy or there are none. */
@@ -125,6 +127,7 @@ export const DEFAULTS: Config = {
   agentsOnMain: true,
   searchUrl: "",
   checkUpdates: true,
+  fullscreen: true,
   advisors: [],
   advisorTimeout: 90,
   dropAdvisors: "session",

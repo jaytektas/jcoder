@@ -289,6 +289,7 @@ objects. Effort, mode, thinking, `maxAgents`, `agentMaxTools`, timeouts, `compac
 | `advisorTimeout` | 90 | seconds to wait for an advisor before trying the next |
 | `dropAdvisors` | `session` | an advisor that ignores us: `never`, `session`, `day`, `week`, `month`, `year`, `permanent` |
 | `checkUpdates` | true | offer new releases once a day |
+| `fullscreen` | true | jcoder draws the whole window: the wheel scrolls, clicking a summary line opens it, dragging selects and copies. `false` prints into the terminal's scrollback instead (ctrl+o still shows every tool call) |
 | `compactAt` | 0.85 | share of the context that triggers compaction |
 | `sampling` | `{}` | per-model sampling, see [Sampling](#sampling) |
 | `extraBody` | `{}` | merged into every request |
