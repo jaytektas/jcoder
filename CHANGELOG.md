@@ -1,5 +1,13 @@
 # Changes
 
+## 0.5.12
+
+- **Resuming picks up the current system prompt.** `jcoder -c` and
+  `/resume` kept the prompt a conversation started with, so prompt fixes
+  (like 0.5.11's) never reached an ongoing conversation. A resumed
+  conversation now gets today's prompt. If the prompt changed, the server
+  re-reads the conversation once on the first reply.
+
 ## 0.5.11
 
 - **Fewer, bigger steps.** The prompt said nothing about working

@@ -13,6 +13,7 @@ import path from "node:path";
 import { textOf, type Content, type Message } from "./client.js";
 import { HOME } from "./config.js";
 import { restoreImage, storeImage } from "./images.js";
+import { systemPrompt } from "./prompt.js";
 
 export interface Session {
   id: string;
@@ -59,6 +60,8 @@ export function saveSession(s: Session): void {
 /** Loads a listed session's images back in, ready to send. */
 export function openSession(s: Session): Session {
   s.messages = s.messages.map((m) => ({ ...m, content: restoreContent(m.content) }) as Message);
+  // Today's system prompt, not the one it started with: prompt fixes reach old conversations too.
+  if (s.messages[0]?.role === "system") s.messages[0] = { role: "system", content: systemPrompt(s.cwd) };
   return s;
 }
 
