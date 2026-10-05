@@ -177,6 +177,8 @@ export class Agent {
   private agents = 0;
   /** Where sub-agents run; worked out on first use. */
   private pool?: Promise<Pool>;
+  /** Messages the user typed while a turn runs, taken between tool calls so the model sees them before its next step. */
+  inbox?: () => Promise<{ text: string; images: Image[] } | null>;
 
   constructor(
     private cfg: Config,
@@ -335,14 +337,18 @@ export class Agent {
     }
   }
 
-  /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
-  async turn(text: string, images: Image[] = []): Promise<string> {
-    let final = "";
+  private addUser(text: string, images: Image[]) {
     const content: Content = images.length
       ? [{ type: "text", text }, ...images.map((i): Part => ({ type: "image_url", image_url: { url: i.url } }))]
       : text;
     this.messages.push({ role: "user", content });
     this.log({ type: "user", content: storeContent(content) });
+  }
+
+  /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
+  async turn(text: string, images: Image[] = []): Promise<string> {
+    let final = "";
+    this.addUser(text, images);
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const started = Date.now();
@@ -373,6 +379,8 @@ export class Agent {
         if (!reply.toolCalls.length) break;
         await this.runTools(reply.toolCalls, signal);
         if (signal.aborted) break;
+        const more = this.sub ? null : await this.inbox?.();
+        if (more) this.addUser(more.text, more.images);
         if (this.sub && this.calls >= this.sub.maxTools) {
           // Out of budget: no more tools, just the report.
           const ask = `You've used ${this.calls} tool calls, the limit for a sub-agent. Stop now and write your report: what's done, what isn't, and what you found.`;

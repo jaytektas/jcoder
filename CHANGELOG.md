@@ -1,5 +1,13 @@
 # Changes
 
+## 0.5.5
+
+- **Queued messages reach the model mid-turn.** What you type while the
+  model works used to wait until the whole turn was over. Now it goes in
+  after the next round of tool calls, so you can steer the model while it
+  works. Several queued messages go together as one. Once the model is
+  writing its final answer, a message still waits for the next turn.
+
 ## 0.5.4
 
 - **No more running out of memory.** jcoder left waiting (a question, a

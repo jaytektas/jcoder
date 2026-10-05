@@ -300,6 +300,8 @@ function App(props: Props) {
   const [question, setQuestion] = useState<Question | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
   const [exitArmed, setExitArmed] = useState(false);
   const [, setTick] = useState(0);
   const rerender = () => setTick((t) => t + 1);
@@ -460,6 +462,7 @@ function App(props: Props) {
   const agentRef = useRef<Agent>(null as any);
   if (!agentRef.current) {
     agentRef.current = new Agent(cfg, props.session, props.contextWindow, stableView);
+    agentRef.current.inbox = () => takeRef.current();
     if (props.resumed) agentRef.current.estimateUsed();
   }
   const agent = agentRef.current;
@@ -468,6 +471,7 @@ function App(props: Props) {
   const newAgent = (session: Session, resumed: boolean) => {
     setTodos([]);
     agentRef.current = new Agent(cfg, session, ctxWindow, stableView);
+    agentRef.current.inbox = () => takeRef.current();
     if (resumed) agentRef.current.estimateUsed();
     rerender();
   };
@@ -586,7 +590,24 @@ function App(props: Props) {
     setBusy(null);
   };
 
-  // Messages typed while a turn runs wait here and go one at a time.
+  // Between tool calls the running turn takes everything queued, as one message.
+  async function takeQueued() {
+    const lines = queueRef.current;
+    if (!lines.length) return null;
+    queueRef.current = [];
+    setQueue((q) => q.slice(lines.length));
+    const pasted = s.current.pasted;
+    s.current.pasted = [];
+    for (const line of lines) showUser(line);
+    const prep = await prepare(lines.join("\n\n"), pasted, agentRef.current.toolContext(new AbortController().signal));
+    for (const e of prep.errors) notice(e, "error");
+    if (prep.notes.length) push(blocks.result(`attached ${prep.notes.join(", ")}`, false));
+    return { text: prep.text, images: prep.images };
+  }
+  const takeRef = useRef(takeQueued);
+  takeRef.current = takeQueued;
+
+  // Messages typed while nothing runs, or after the last tool call, wait here and go one at a time.
   useEffect(() => {
     if (busy || pick || !queue.length || agentRef.current.running) return;
     const [next, ...rest] = queue;
