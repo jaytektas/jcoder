@@ -1,5 +1,23 @@
 # Changes
 
+## 0.5.11
+
+- **Fewer, bigger steps.** The prompt said nothing about working
+  efficiently, and the logs showed it: 91% of steps made a single tool
+  call, `bash` was used for nearly everything, and small probes went one
+  per round trip. The system prompt (and the sub-agent's) now asks it to
+  plan, batch independent reads and searches into one step, chain shell
+  commands, use read_file/grep/glob to look at code, and stop exploring
+  once it can act.
+- **No more sleeping to wait.** The model had written about two hours of
+  `sleep` into its commands. It's now told to run long jobs with
+  `background` and use `bash_output` with `wait`, which returns as soon as
+  there is output or the job ends.
+- **Remote background processes don't hang the call.** Starting one with
+  `ssh host "cmd &"` kept ssh open until the timeout killed it (31 times in
+  the logs). The prompt and the bash tool now say to detach it:
+  `nohup cmd > log 2>&1 < /dev/null &`.
+
 ## 0.5.10
 
 - **No more minute-long stall after you type.** At the start of each turn

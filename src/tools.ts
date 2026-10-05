@@ -288,7 +288,9 @@ const bash: Tool = {
     "bash",
     "Run a bash command in the project directory. Each call is a fresh shell: cd does not carry over. " +
       "Output is stdout+stderr. Don't run interactive programs. For a server, watcher or anything that " +
-      "keeps running, set background: you get a job id at once; read its output with bash_output, stop it with bash_stop.",
+      "keeps running, set background: you get a job id at once; read its output with bash_output, stop it with bash_stop. " +
+      "Chain related commands into one call. Don't sleep to wait for something: use background and bash_output wait. " +
+      "Over ssh, detach long-lived processes (nohup cmd > log 2>&1 < /dev/null &) or the call hangs until the timeout.",
     {
       command: str("The command"),
       timeout: int("Seconds before it is killed (max 600); not for background jobs"),
@@ -361,7 +363,7 @@ const bashOutput: Tool = {
   schema: def(
     "bash_output",
     "New output from a background job since you last read it, and whether it is still running.",
-    { id: str("Job id, e.g. job1"), wait: int("Seconds to wait for new output or for it to finish (default 0, max 120)") },
+    { id: str("Job id, e.g. job1"), wait: int("Seconds to wait for new output or for it to finish (default 0, max 120); returns as soon as either happens") },
     ["id"],
   ),
   writes: false,
