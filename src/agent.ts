@@ -408,6 +408,8 @@ export class Agent {
         }
         if (!reply.toolCalls.length) break;
         await this.runTools(reply.toolCalls, signal);
+        // Saved as it goes, so a crash or a kill mid-turn keeps the work done so far.
+        if (!this.sub) saveSession(this.session);
         if (signal.aborted) break;
         const more = this.sub ? null : await this.inbox?.();
         if (more) this.addUser(more.text, more.images);
@@ -626,7 +628,7 @@ export class Agent {
     let text = `This conversation was compacted to save space. Summary of it so far:\n\n${summary}`;
     let images: Part[] = [];
     if (midTurn && lastUser) {
-      text += `\n\nThe user's latest request, word for word:\n${textOf(lastUser.content)}\n\nCarry on with it.`;
+      text += `\n\nThe last thing the user said before the cut, word for word (already part of the summary above, not a new message):\n${textOf(lastUser.content)}\n\nCarry on with the work. Anything the user says from here on comes after this summary, and the newest message is the one to answer.`;
       if (Array.isArray(lastUser.content)) images = lastUser.content.filter((p) => p.type === "image_url");
     }
     if (this.todos.length)

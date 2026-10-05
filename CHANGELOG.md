@@ -1,5 +1,17 @@
 # Changes
 
+## 0.5.7
+
+- **A crash mid-turn no longer loses the turn.** The conversation was only
+  saved when a turn finished, so if jcoder died during a long one, `-c`
+  brought back the state from before it. It's now saved after every round
+  of tool calls, and written so a crash mid-write can't leave half a file.
+- **After compacting mid-turn the model answers the right message.** The
+  summary ended with "the user's latest request … carry on with it", which
+  a model deep in a long turn could take for the newest message and answer
+  again. It now says that request came before the cut, and that the newest
+  message is the one to answer.
+
 ## 0.5.6
 
 - **`/btw <question>`**: ask something on the side while the model works.

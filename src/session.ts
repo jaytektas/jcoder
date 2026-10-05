@@ -44,13 +44,16 @@ function restoreContent(c: Content | null): Content | null {
   });
 }
 
-/** The current conversation, overwritten after every turn; what resume loads. */
+/** The current conversation, overwritten as a turn goes; what resume loads. */
 export function saveSession(s: Session): void {
   if (s.messages.length < 2) return;
   s.updated = new Date().toISOString();
   const messages = s.messages.map((m) => ({ ...m, content: storeContent(m.content) }));
   fs.mkdirSync(DIR, { recursive: true });
-  fs.writeFileSync(path.join(DIR, `${s.id}.json`), JSON.stringify({ ...s, messages }));
+  // Written then renamed, so a crash mid-write never leaves half a file.
+  const file = path.join(DIR, `${s.id}.json`);
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify({ ...s, messages }));
+  fs.renameSync(`${file}.tmp`, file);
 }
 
 /** Loads a listed session's images back in, ready to send. */
