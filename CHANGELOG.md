@@ -1,5 +1,19 @@
 # Changes
 
+## 0.5.10
+
+- **No more minute-long stall after you type.** At the start of each turn
+  jcoder dropped the thinking from every earlier step. That changed the
+  prompt just after the system prompt, so the server re-read the whole
+  conversation before it could answer: 66–121 s on a 110k–177k token
+  session with Strata. Thinking now stays until the conversation is
+  compacted, and the server reuses its cache.
+- **One token count for the whole turn.** The status line shows
+  `↓ 1.2k tokens` for everything the model has written this turn
+  (thinking, text and tool calls, across every step), including while
+  tools run. The `✓ Done` line shows it too. It used to count only
+  thinking, restart at each step, and show tool calls in characters.
+
 ## 0.5.9
 
 - **A dropped connection is retried once.** When the server closed the

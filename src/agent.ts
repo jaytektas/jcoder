@@ -22,10 +22,10 @@ import type { AgentStatus, View } from "./view.js";
 export const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 /** A bar for reading the prompt, but only when there's enough uncached to take a while. */
-function readingProgress(view: View, label: string) {
+function readingProgress(view: View, label: string, extra = () => "") {
   return (done: number, total: number, cached: number) => {
     if (total - cached < 2000 || done >= total) return;
-    view.busy(label, `${k(done)}/${k(total)} tokens`, done / total);
+    view.busy(label, [`${k(done)}/${k(total)} tokens`, extra()].filter(Boolean).join(" · "), done / total);
   };
 }
 
@@ -378,8 +378,9 @@ export class Agent {
   /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
   async turn(text: string, images: Image[] = []): Promise<string> {
     let final = "";
-    // Thinking goes back only within a turn: older turns' would crowd the context.
-    for (const m of this.messages) if (m.role === "assistant") delete m.reasoning_content;
+    // Older turns keep their thinking: stripping it changes the prompt right after the system prompt,
+    // so the server re-reads the whole conversation (minutes on a long one). Compacting drops it.
+    this.turnTokens = 0;
     this.addUser(text, images);
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -440,7 +441,7 @@ export class Agent {
     }
     this.view.turnDone({
       seconds: (Date.now() - started) / 1000,
-      status: this.used ? this.status() : "",
+      status: [this.tokens, this.used ? this.status() : ""].filter(Boolean).join(" · "),
       stopped: signal.aborted,
     });
     return final;
@@ -457,12 +458,18 @@ export class Agent {
     return Math.round((100 * this.used) / this.contextWindow);
   }
 
+  /** Tokens the model has written this turn, over every call: thinking, text and tool calls. */
+  private turnTokens = 0;
+  private get tokens(): string {
+    return this.turnTokens ? `↓ ${k(this.turnTokens)} tokens` : "";
+  }
+
   /** One model call, streamed to the view. Returns null if interrupted or failed. */
   private async generate(signal: AbortSignal, noTools = false, retried = false): Promise<Reply | null> {
-    let thinkTokens = 0;
+    const before = this.turnTokens;
     let printed = "";
     let streamed = false;
-    this.view.busy("Thinking");
+    this.view.busy("Thinking", this.tokens);
     try {
       const reply = await chat(
         this.cfg,
@@ -471,21 +478,23 @@ export class Agent {
         {
           onReasoning: (t) => {
             streamed = true;
-            thinkTokens++;
+            this.turnTokens++;
             if (this.cfg.showThinking) this.view.thinking(t);
-            this.view.busy("Thinking", `${k(thinkTokens)} tokens`);
+            this.view.busy("Thinking", this.tokens);
           },
           onContent: (t) => {
             streamed = true;
             printed += t;
+            this.turnTokens++;
             this.view.text(t);
-            this.view.busy("Writing");
+            this.view.busy("Writing", this.tokens);
           },
-          onToolArgs: (name, chars) => {
+          onToolArgs: (name) => {
             streamed = true;
-            this.view.busy(`Preparing ${name}`, `${k(chars)} chars`);
+            this.turnTokens++;
+            this.view.busy(`Preparing ${name}`, this.tokens);
           },
-          onPromptProgress: readingProgress(this.view, "Reading"),
+          onPromptProgress: readingProgress(this.view, "Reading", () => this.tokens),
         },
         signal,
         noTools ? { toolChoice: "none" } : {},
@@ -495,6 +504,8 @@ export class Agent {
         this.lastPrompt = reply.usage.prompt;
         this.lastCached = reply.usage.cached;
         this.used = reply.usage.prompt + reply.usage.completion;
+        // Streamed chunks are only roughly tokens; the server's count is exact.
+        if (reply.usage.completion) this.turnTokens = before + reply.usage.completion;
         if (reply.usage.genPerSec) this.lastSpeed = reply.usage.genPerSec;
       }
       if (!reply.content && !reply.toolCalls.length && reply.reasoning)
@@ -567,7 +578,7 @@ export class Agent {
       return { content: `There is no tool called ${name}. Tools: ${Object.keys(TOOLS).join(", ")}.`, error: true };
     }
     this.view.tool(name, toolLine(name, args, this.session.cwd));
-    this.view.busy(`Running ${name}`);
+    this.view.busy(`Running ${name}`, this.tokens);
 
     let result: ToolResult;
     if (this.cfg.mode === "ro" && tool.writes) {
