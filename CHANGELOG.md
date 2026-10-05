@@ -1,5 +1,14 @@
 # Changes
 
+## 0.5.9
+
+- **A dropped connection is retried once.** When the server closed the
+  connection before sending anything (restarting, or failing on the
+  request), jcoder showed `fetch failed` and the turn stopped until you
+  typed something. It now says so and tries again once, three seconds
+  later. Nothing is retried after output has started, so nothing shows
+  twice.
+
 ## 0.5.8
 
 - **The model keeps its train of thought through a long turn.** jcoder sent

@@ -458,9 +458,10 @@ export class Agent {
   }
 
   /** One model call, streamed to the view. Returns null if interrupted or failed. */
-  private async generate(signal: AbortSignal, noTools = false): Promise<Reply | null> {
+  private async generate(signal: AbortSignal, noTools = false, retried = false): Promise<Reply | null> {
     let thinkTokens = 0;
     let printed = "";
+    let streamed = false;
     this.view.busy("Thinking");
     try {
       const reply = await chat(
@@ -469,16 +470,21 @@ export class Agent {
         this.tools,
         {
           onReasoning: (t) => {
+            streamed = true;
             thinkTokens++;
             if (this.cfg.showThinking) this.view.thinking(t);
             this.view.busy("Thinking", `${k(thinkTokens)} tokens`);
           },
           onContent: (t) => {
+            streamed = true;
             printed += t;
             this.view.text(t);
             this.view.busy("Writing");
           },
-          onToolArgs: (name, chars) => this.view.busy(`Preparing ${name}`, `${k(chars)} chars`),
+          onToolArgs: (name, chars) => {
+            streamed = true;
+            this.view.busy(`Preparing ${name}`, `${k(chars)} chars`);
+          },
           onPromptProgress: readingProgress(this.view, "Reading"),
         },
         signal,
@@ -501,6 +507,14 @@ export class Agent {
         this.messages.push({ role: "assistant", content: (printed ? printed + "\n" : "") + "[interrupted by the user]" });
         this.log({ type: "interrupted", content: printed });
         return null;
+      }
+      // The connection dropped before anything came back (a server restarting, or one that died on the
+      // request): try once more before giving up on the turn. Not after output, which would show twice.
+      if (!retried && !streamed && (e.message === "fetch failed" || /terminated|ECONNRESET|socket/i.test(e.message))) {
+        this.view.notice(`The server dropped the connection (${e.message}); trying again…`, "warn");
+        this.log({ type: "retry", message: e.message });
+        await new Promise((r) => setTimeout(r, 3000));
+        return this.generate(signal, noTools, true);   // stopped meanwhile: that call says so
       }
       this.view.notice(`error: ${e.message}`, "error");
       this.messages.push({ role: "assistant", content: `[request failed: ${e.message}]` });
