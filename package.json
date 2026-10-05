@@ -1,6 +1,6 @@
 {
   "name": "jcoder",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "A coding agent for a local OpenAI-compatible LLM server",
   "main": "dist/index.js",
   "scripts": {
