@@ -1094,8 +1094,12 @@ function App(props: Props) {
   const [pinTop, setPinTop] = useState<number | null>(null);
   const [sel, setSel] = useState<{ a: Pos; b: Pos } | null>(null);
   const [flash, setFlash] = useState("");
-  const viewBox = useRef<any>(null);
-  const viewH = Math.max(1, useHeight(viewBox) ?? rows - 6);
+  // The conversation gets the room left after what's happening now.
+  const areaBox = useRef<any>(null);
+  const activityBox = useRef<any>(null);
+  const areaH = useHeight(areaBox);
+  const activityH = useHeight(activityBox) ?? 0;
+  const viewH = Math.max(1, (areaH ?? rows - 6) - activityH);
   const lineCache = useRef(new Map<number, { w: number; open: boolean; lines: string[] }>());
   const flat = useMemo(() => {
     const lines: string[] = [];
@@ -1133,7 +1137,6 @@ function App(props: Props) {
       for (let i = Math.max(a.line, top); i <= Math.min(b.line, top + out.length - 1); i++)
         out[i - top] = invertColumns(out[i - top], i === a.line ? a.col : 0, i === b.line ? b.col + 1 : columns);
     }
-    while (out.length < viewH) out.push("");
     if (!atBottom) {
       const pill = " Jump to bottom (ctrl+End) ↓ ";
       out[out.length - 1] = " ".repeat(Math.max(0, Math.floor((columns - pill.length) / 2))) + `\x1b[7m${pill}\x1b[27m`;
@@ -1159,7 +1162,8 @@ function App(props: Props) {
     if (transcriptOpen) return;
     if (m.kind === "wheel") return scrollBy(m.button * 3);
     if (m.button !== 0) return;
-    const y = Math.max(0, Math.min(viewH - 1, m.y));
+    const shown = Math.min(viewH, total - top); // rows of conversation on screen
+    const y = Math.max(0, Math.min(shown - 1, m.y));
     const at: Pos = { line: top + y, col: m.x };
     if (m.kind === "press") {
       drag.current = { from: at, moved: false };
@@ -1178,9 +1182,9 @@ function App(props: Props) {
           setFlash(`copied ${text.length} character${text.length === 1 ? "" : "s"}`);
           setTimeout(() => setFlash(""), 2500);
         }
-      } else if (m.y < viewH && !atBottom && m.y === viewH - 1) {
+      } else if (!atBottom && m.y === shown - 1) {
         toBottom(); // the pill
-      } else if (m.y < viewH && at.line < total) {
+      } else if (m.y < shown) {
         const it = items[flat.owner[at.line]];
         if (it?.entries) {
           // Opened in place: the view holds still and it unfolds below.
@@ -1236,23 +1240,10 @@ function App(props: Props) {
   const openTodos = todos.some((t) => t.status !== "done") ? todos : [];
   const runningJobs = a.jobs.list().filter((j) => !j.exit).length;
 
-  return (
-    <Width.Provider value={columns}>
-      {!appDrawn && <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>}
-
-      <Box flexDirection="column" justifyContent="flex-end" {...(appDrawn ? { height: rows } : { minHeight: Math.min(budget, maxBudget) })}>
-      {appDrawn && (
-        <Box ref={viewBox} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden" display={transcriptOpen ? "none" : "flex"}>
-          <Text>{visible}</Text>
-        </Box>
-      )}
-      {/* Measured without the padding around it: only real content growing past the budget grows it. */}
-      <Box ref={liveRef} flexDirection="column" flexShrink={0}>
-      {transcriptOpen && (
-        <Transcript entries={transcript.current} rows={rows} columns={columns} running={a.running} onClose={() => setShowTranscript(false)} />
-      )}
-      <Box flexDirection="column" display={transcriptOpen ? "none" : "flex"}>
-
+  // What the model is doing right now. App-drawn, it sits under the last
+  // line of the conversation; otherwise above the input.
+  const activity = (
+    <>
       {groupLive && (groupLive.text || groupLive.current) && (
         <BlockView
           b={{
@@ -1274,6 +1265,32 @@ function App(props: Props) {
         </Box>
       )}
       {busy && <Spinner {...busy} />}
+    </>
+  );
+
+  return (
+    <Width.Provider value={columns}>
+      {!appDrawn && <Static items={items}>{(it) => <BlockView key={it.id} b={it.b} />}</Static>}
+
+      <Box flexDirection="column" justifyContent="flex-end" {...(appDrawn ? { height: rows } : { minHeight: Math.min(budget, maxBudget) })}>
+      {appDrawn && (
+        <Box ref={areaBox} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden" display={transcriptOpen ? "none" : "flex"}>
+          <Box flexDirection="column" flexShrink={0}>
+            <Text>{visible}</Text>
+          </Box>
+          <Box ref={activityBox} flexDirection="column" flexShrink={0}>
+            {activity}
+          </Box>
+        </Box>
+      )}
+      {/* Measured without the padding around it: only real content growing past the budget grows it. */}
+      <Box ref={liveRef} flexDirection="column" flexShrink={0}>
+      {transcriptOpen && (
+        <Transcript entries={transcript.current} rows={rows} columns={columns} running={a.running} onClose={() => setShowTranscript(false)} />
+      )}
+      <Box flexDirection="column" display={transcriptOpen ? "none" : "flex"}>
+
+      {!appDrawn && activity}
 
       {queue.map((q, i) => (
         <Text key={i} color="gray">

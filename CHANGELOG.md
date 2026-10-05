@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.1
+
+- **What the model is doing sits under the conversation.** The tool
+  summary in progress, the running command and the spinner were pinned
+  above the input, with a gap between them and the last message on a
+  short conversation. They now follow the last line and move down as it
+  grows; the input stays at the bottom.
+
 ## 0.6.0
 
 - **jcoder now draws the whole window, like Claude Code's fullscreen
