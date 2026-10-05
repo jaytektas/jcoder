@@ -275,6 +275,7 @@ objects. Effort, mode, thinking, `maxAgents`, `agentMaxTools`, timeouts, `compac
 | `contextWindow` | 32768 | used when the server doesn't report it (llama.cpp does) |
 | `effort` | `high` | see [Effort](#effort) |
 | `showThinking` | false | show the model's thinking |
+| `keepThinking` | true | send the model's thinking back with its steps for the rest of a turn (`reasoning_content`); turn off for a server that rejects it |
 | `mode` | `edit` | `ro` · `edit` · `auto` |
 | `maxToolChars` | 24000 | tool output longer than this is cut to its start and end |
 | `agentServers` | `[]` | other servers for sub-agents, see [Agents on other machines](#tools) |

@@ -378,6 +378,8 @@ export class Agent {
   /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
   async turn(text: string, images: Image[] = []): Promise<string> {
     let final = "";
+    // Thinking goes back only within a turn: older turns' would crowd the context.
+    for (const m of this.messages) if (m.role === "assistant") delete m.reasoning_content;
     this.addUser(text, images);
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -401,6 +403,8 @@ export class Agent {
           role: "assistant",
           content: reply.content || null,
           ...(reply.toolCalls.length ? { tool_calls: reply.toolCalls } : {}),
+          // Its thinking goes back with it: without it a model loses track over a long turn.
+          ...(this.cfg.keepThinking && reply.reasoning.trim() ? { reasoning_content: reply.reasoning } : {}),
         });
         if (reply.finish === "length") {
           this.view.notice("The reply hit the server's length limit, or the context is full.", "warn");
@@ -667,6 +671,7 @@ export class Agent {
       chars += textOf(m.content).length;
       images += imageCount(m.content);
       if (m.role === "assistant" && m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
+      if (m.role === "assistant" && m.reasoning_content) chars += m.reasoning_content.length;
     }
     this.used = Math.ceil(chars / 3.5) + images * 1024;
   }

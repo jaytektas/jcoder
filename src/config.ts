@@ -34,6 +34,8 @@ export interface Config {
   effort: Effort;
   /** Print the model's thinking instead of a spinner. */
   showThinking: boolean;
+  /** Send the model's thinking back with its steps for the rest of the turn, so it keeps its train of thought between tool calls. */
+  keepThinking: boolean;
   mode: Mode;
   /** Tool results longer than this are cut to head + tail. */
   maxToolChars: number;
@@ -112,6 +114,7 @@ export const DEFAULTS: Config = {
   contextWindow: 32768,
   effort: "high",
   showThinking: false,
+  keepThinking: true,
   mode: "edit",
   maxToolChars: 24000,
   bashTimeout: 120,
@@ -178,7 +181,7 @@ export function saveConfig(cfg: Config): void {
 }
 
 /** Settings that take effect at once when changed with /setting; the rest at the next start. */
-export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "agentMaxTools", "extraBody", "sampling"]);
+export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "keepThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "agentMaxTools", "extraBody", "sampling"]);
 
 const CHOICES: Partial<Record<keyof Config, readonly string[]>> = {
   effort: EFFORTS,

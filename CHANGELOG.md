@@ -1,5 +1,17 @@
 # Changes
 
+## 0.5.8
+
+- **The model keeps its train of thought through a long turn.** jcoder sent
+  the model's steps back without the thinking behind them, so after many
+  tool calls it had to work out from scratch what it was doing, and could
+  latch onto an old question and answer it again. Its thinking now goes
+  back with each step until the turn ends (as `reasoning_content`; older
+  turns' is dropped to save context). Replaying a session that went wrong
+  this way, the model stayed on task with it and lost track without it.
+  It costs context, so long turns compact sooner. **`keepThinking`** (on)
+  turns it off for a server that rejects the field.
+
 ## 0.5.7
 
 - **A crash mid-turn no longer loses the turn.** The conversation was only

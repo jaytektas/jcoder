@@ -23,7 +23,7 @@ export type Content = string | Part[];
 export type Message =
   | { role: "system"; content: string }
   | { role: "user"; content: Content }
-  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
+  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[]; reasoning_content?: string }
   | { role: "tool"; tool_call_id: string; content: Content };
 
 export function textOf(c: Content | null): string {
