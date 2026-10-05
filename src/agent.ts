@@ -8,7 +8,7 @@
 // any later version. It is distributed WITHOUT ANY WARRANTY; see the LICENSE
 // file for details.
 
-import { chat, listModels, serverContext, serverInfo, imageCount, textOf, type Content, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
+import { chat, listModels, serverContext, serverInfo, imageCount, textOf, type Content, type Handlers, type Message, type Part, type Reply, type ToolCall, type ToolSchema } from "./client.js";
 import { saveSettings, type Config } from "./config.js";
 import type { Image } from "./images.js";
 import { DROP_DAYS, dropped, PRESETS, resolveAdvisors, type Advisor } from "./advisors.js";
@@ -16,7 +16,7 @@ import { agentPrompt } from "./prompt.js";
 import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
 import { schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
-import { preview } from "./ui.js";
+import { duration, preview } from "./ui.js";
 import type { AgentStatus, View } from "./view.js";
 
 export const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -324,7 +324,7 @@ export class Agent {
       try {
         const report = await agent.turn(task);
         const secs = Math.round((Date.now() - started) / 1000);
-        const summary = `"${description}"${where ? ` on ${where}` : ""} · ${secs}s · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
+        const summary = `"${description}"${where ? ` on ${where}` : ""} · ${duration(secs)} · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
         if (signal.aborted) return { content: "The user interrupted the agent.", display: `stopped after ${summary}`, error: true };
         if (!report.trim()) return { content: "The agent finished without a report.", display: `no report · ${summary}`, error: true };
         return { content: `Report from the agent ("${description}"):\n\n${report}`, display: `${summary}\n${preview(report, 4)}` };
@@ -343,6 +343,36 @@ export class Agent {
       : text;
     this.messages.push({ role: "user", content });
     this.log({ type: "user", content: storeContent(content) });
+  }
+
+  /**
+   * A side question about the conversation (/btw): one reply, no tools, kept
+   * out of the history and the log, so a running turn carries on untouched.
+   * Sends the same messages and tools as the turn, so the server can reuse
+   * the prompt it has cached.
+   */
+  async btw(question: string, h: Handlers, signal: AbortSignal): Promise<string> {
+    const messages = [...this.messages];
+    // Mid-turn the last tool calls may not have results yet; every call needs one.
+    const last = messages.findLastIndex((m) => m.role === "assistant");
+    const calls = last >= 0 ? (messages[last] as { tool_calls?: ToolCall[] }).tool_calls ?? [] : [];
+    const answered = new Set(messages.slice(last + 1).flatMap((m) => (m.role === "tool" ? [m.tool_call_id] : [])));
+    for (const c of calls)
+      if (!answered.has(c.id)) messages.push({ role: "tool", tool_call_id: c.id, content: "(still running)" });
+    const ask = `[A side question from the user while you work. Answer it briefly from what you already know: you can't use tools for it, and your task carries on afterwards.]\n\n${question}`;
+    const end = messages[messages.length - 1];
+    // Some chat templates won't take two user messages in a row.
+    if (end?.role === "user")
+      messages[messages.length - 1] = {
+        role: "user",
+        content: typeof end.content === "string" ? `${end.content}\n\n${ask}` : [...end.content, { type: "text", text: ask }],
+      };
+    else messages.push({ role: "user", content: ask });
+    const reply = await chat(this.cfg, messages, this.tools, h, signal, {
+      toolChoice: "none",
+      effort: this.cfg.effort === "off" ? "off" : "low",
+    });
+    return reply.content;
   }
 
   /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */

@@ -24,6 +24,13 @@ export const c = {
 
 export const write = (s: string) => process.stdout.write(s);
 
+/** Seconds as people read them: 42s, 8m 26s, 3h 14m 12s. */
+export function duration(seconds: number): string {
+  const t = Math.round(seconds);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;
+}
+
 export function preview(text: string, maxLines: number): string {
   const lines = text.replace(/\s+$/, "").split("\n");
   const shown = lines.slice(0, maxLines).map((l) => (l.length > 160 ? l.slice(0, 160) + "…" : l));

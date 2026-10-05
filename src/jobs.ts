@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { HOME } from "./config.js";
+import { duration } from "./ui.js";
 
 interface Job {
   id: string;
@@ -95,7 +96,7 @@ export class Jobs {
 
   status(job: Job): string {
     const secs = Math.round((Date.now() - job.started) / 1000);
-    return job.exit ? `${job.exit} after ${secs}s` : `running for ${secs}s`;
+    return job.exit ? `${job.exit} after ${duration(secs)}` : `running for ${duration(secs)}`;
   }
 
   stop(id: string): boolean {

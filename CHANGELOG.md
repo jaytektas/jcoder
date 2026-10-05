@@ -1,5 +1,15 @@
 # Changes
 
+## 0.5.6
+
+- **`/btw <question>`**: ask something on the side while the model works.
+  The answer shows in a box above the input (esc closes it); the model
+  carries on, and neither the question nor the answer goes into the
+  conversation. It can't use tools. On a one-slot server it waits for the
+  current reply to finish.
+- **Times read as hours, minutes and seconds**: `8m 26s`, `3h 14m 12s`
+  instead of `506s`, on the spinner, agent lines, "Done in" and jobs.
+
 ## 0.5.5
 
 - **Queued messages reach the model mid-turn.** What you type while the

@@ -26,6 +26,7 @@ export const COMMANDS: Command[] = [
   { name: "mode", args: "[ro|edit|auto]", desc: "permissions; no argument cycles (also shift+tab)" },
   { name: "yolo", desc: "auto mode: runs commands and edits without asking" },
   { name: "effort", args: "[off|low|medium|high|max]", desc: "how hard the model thinks; no argument cycles" },
+  { name: "btw", args: "<question>", desc: "ask on the side while the model works; kept out of the conversation" },
   { name: "thoughts", desc: "show or hide the model's thinking (also ctrl+t)" },
   { name: "model", args: "[id]", desc: "list the server's models, or switch" },
   { name: "ctx", desc: "context use" },

@@ -28,7 +28,7 @@ import { LOGO_WIDTH, logo } from "./logo.js";
 import { ask as askAdvisors, dropped, inactive, PRESETS } from "./advisors.js";
 import { checkForUpdate, install, selfUpdate, skipVersion, VERSION } from "./update.js";
 import type { AgentStatus, View } from "./view.js";
-import { preview } from "./ui.js";
+import { duration, preview } from "./ui.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
 const MODE_LABEL: Record<Mode, [string, string]> = {
@@ -218,7 +218,7 @@ function Spinner({ label, detail, since, progress }: { label: string; detail: st
           {SPIN[frame % SPIN.length]} {label}…{" "}
         </Text>
         {progress !== undefined && <Text color="magenta">{bar(progress)} </Text>}
-        <Text color="gray">({[`${secs}s`, detail, "esc to interrupt"].filter(Boolean).join(" · ")})</Text>
+        <Text color="gray">({[duration(secs), detail, "esc to interrupt"].filter(Boolean).join(" · ")})</Text>
       </Text>
     </Box>
   );
@@ -228,7 +228,7 @@ function Spinner({ label, detail, since, progress }: { label: string; detail: st
 function AgentLine({ st }: { st: AgentStatus }) {
   const frame = useSpinFrame();
   const secs = Math.floor((Date.now() - st.started) / 1000);
-  const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
+  const time = duration(secs);
   // What it last ran stays on show while it thinks about the result, so
   // the line says where it is in its work, not just a token count.
   const now = st.label.startsWith("Running") ? "" : [st.label.toLowerCase(), st.detail].filter(Boolean).join(" ");
@@ -300,6 +300,7 @@ function App(props: Props) {
   const [question, setQuestion] = useState<Question | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
+  const [btw, setBtw] = useState<{ question: string; answer: string; status: string; stop: AbortController } | null>(null);
   const queueRef = useRef(queue);
   queueRef.current = queue;
   const [exitArmed, setExitArmed] = useState(false);
@@ -447,8 +448,7 @@ function App(props: Props) {
     turnDone({ seconds, status, stopped }) {
       setBusy(null);
       if (stopped) push({ prefix: "  └  ", prefixColor: "red", text: "Interrupted · tell it what to do instead", color: "red" });
-      const secs = seconds < 60 ? `${Math.round(seconds)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-      push({ text: `✓ Done in ${secs}${status ? ` · ${status}` : ""}`, color: "gray", marginTop: 1 });
+      push({ text: `✓ Done in ${duration(seconds)}${status ? ` · ${status}` : ""}`, color: "gray", marginTop: 1 });
     },
   };
   const viewRef = useRef(view);
@@ -648,11 +648,37 @@ function App(props: Props) {
             ansi.gray("ctrl+v         paste an image from the clipboard"),
             ansi.gray("\\ + enter      new line (alt+enter and ctrl+j too)"),
             ansi.gray("shift+tab      cycle mode · ctrl+t show/hide thinking"),
-            ansi.gray("esc            stop the model · ctrl+d quit"),
+            ansi.gray("esc            close /btw, else stop the model · ctrl+d quit"),
             ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
           ].join("\n"),
         });
         break;
+      case "btw": {
+        if (!arg) {
+          notice("Usage: /btw <question> — asked on the side, without stopping the model.", "warn");
+          break;
+        }
+        btw?.stop.abort();
+        const stop = new AbortController();
+        const update = (f: (b: NonNullable<typeof btw>) => Partial<NonNullable<typeof btw>>) =>
+          setBtw((b) => (b && b.stop === stop ? { ...b, ...f(b) } : b));
+        setBtw({ question: arg, answer: "", status: "waiting for the server", stop });
+        let thought = 0;
+        try {
+          const answer = await a.btw(
+            arg,
+            {
+              onReasoning: () => update(() => ({ status: `thinking · ${++thought} tokens` })),
+              onContent: (t) => update((b) => ({ answer: b.answer + t, status: "" })),
+            },
+            stop.signal,
+          );
+          update(() => ({ answer, status: answer.trim() ? "" : "no answer" }));
+        } catch (e: any) {
+          if (!stop.signal.aborted) update(() => ({ status: `failed: ${e.message}` }));
+        }
+        break;
+      }
       case "exit":
       case "quit":
         exit();
@@ -847,7 +873,7 @@ function App(props: Props) {
     setExitArmed(false);
     const line = text.trim();
     if (line.startsWith("/") && !line.includes("\n")) {
-      if (agentRef.current.running && !/^\/(thoughts|mode|ctx|log|help)\b/.test(line)) {
+      if (agentRef.current.running && !/^\/(btw|thoughts|mode|ctx|log|help)\b/.test(line)) {
         notice("Wait for the model to finish, or press esc.", "warn");
         return false;
       }
@@ -859,7 +885,10 @@ function App(props: Props) {
 
   // App-wide keys. The editor handles typing.
   useInput((input, key) => {
-    if (key.escape && agentRef.current.running && !ask && !pick && !question) agentRef.current.stop();
+    if (key.escape && btw && !ask && !pick && !question) {
+      btw.stop.abort();
+      setBtw(null);
+    } else if (key.escape && agentRef.current.running && !ask && !pick && !question) agentRef.current.stop();
     else if (key.tab && key.shift) setMode(MODES[(MODES.indexOf(cfg.mode) + 1) % MODES.length]);
     else if (key.ctrl && input === "t") {
       cfg.showThinking = !cfg.showThinking;
@@ -977,6 +1006,14 @@ function App(props: Props) {
               q.resolve(null);
             }}
           />
+        </Box>
+      )}
+
+      {btw && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="gray" paddingX={1}>
+          <Text color="cyan">/btw {btw.question}</Text>
+          {btw.answer.trim() && <Text>{fit(renderMarkdown(btw.answer.trim()))}</Text>}
+          <Text color="gray">{btw.status ? `${btw.status} · ` : ""}esc to close</Text>
         </Box>
       )}
 
