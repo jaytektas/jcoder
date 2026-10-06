@@ -116,10 +116,12 @@ const blocks = {
   // A display with its own colours (a diff) keeps them; plain ones are gray.
   result: (display: string, error: boolean): Block => ({ prefix: "  └  ", prefixColor: "gray", text: display, color: error ? "red" : display.includes("\x1b[") ? undefined : "gray" }),
   /** A run of quiet tool calls, as one line: "Ran 2 shell commands, read 3 files". */
-  group: (text: string, failed: number, hint = "ctrl+o to expand"): Block => ({
+  group: (text: string, failed: number, hint = "ctrl+o to expand", hot = false): Block => ({
     prefix: "  ",
-    text: `${text}${failed ? ` · \x1b[31m${failed} failed\x1b[39m` : ""} ${ansi.gray(`(${hint})`)}`,
-    color: "gray",
+    text: `${hot ? `\x1b[4m${text}\x1b[24m` : text}${failed ? ` · \x1b[31m${failed} failed\x1b[39m` : ""} ${ansi.gray(`(${hint})`)}`,
+    // Under the mouse it lights up, as a link would.
+    color: hot ? undefined : "gray",
+    bg: hot ? "#2a2a2a" : undefined,
     marginTop: 1,
   }),
   notice: (text: string, tone: "info" | "warn" | "error"): Block => ({ prefix: "  ", text, color: tone === "error" ? "red" : tone === "warn" ? "yellow" : "gray" }),
@@ -187,6 +189,8 @@ interface Item {
   b: Block;
   /** A summary line of quiet tool calls: what clicking it opens. */
   entries?: Entry[];
+  /** The summary line as drawn under the mouse, like a link. */
+  hot?: Block;
 }
 
 /** A place in the app-drawn screen's lines. */
@@ -495,16 +499,20 @@ function App(props: Props) {
   }, [rows]);
 
   const nextId = useRef(0);
-  const pushRaw = (b: Block, entries?: Entry[]) => {
+  const pushRaw = (b: Block, entries?: Entry[], hot?: Block) => {
     const height = blockRows(b, columns);
     setBudget((x) => Math.max(0, x - height));
-    setItems((xs) => [...xs, { id: nextId.current++, b, entries }]);
+    setItems((xs) => [...xs, { id: nextId.current++, b, entries, hot }]);
   };
 
   // Quiet tool calls gather into a group, shown live while it grows and
   // printed as one line when anything else is printed.
   const group = useRef<Group | null>(null);
   const [groupLive, setGroupLive] = useState<{ text: string; current: string } | null>(null);
+  // App-drawn, the group still growing can be opened too, and stays open once printed.
+  const [liveOpen, setLiveOpen] = useState(false);
+  const liveOpenRef = useRef(liveOpen);
+  liveOpenRef.current = liveOpen;
   const transcript = useRef<Entry[]>([]);
   const pending = useRef<{ name: string; summary: string }>({ name: "tool", summary: "" });
   const [showTranscript, setShowTranscript] = useState(false);
@@ -513,7 +521,12 @@ function App(props: Props) {
     if (!g) return;
     group.current = null;
     setGroupLive(null);
-    pushRaw(blocks.group(groupText(g), g.failed, appDrawn ? "click to expand" : undefined), g.entries);
+    if (liveOpenRef.current) {
+      setLiveOpen(false);
+      setExpanded((e) => new Set(e).add(nextId.current));
+    }
+    const hint = appDrawn ? "click to expand" : undefined;
+    pushRaw(blocks.group(groupText(g), g.failed, hint), g.entries, blocks.group(groupText(g), g.failed, hint, true));
   };
   const push = (b: Block) => {
     flushGroup();
@@ -1091,6 +1104,8 @@ function App(props: Props) {
   // Every item becomes finished lines; the window shows a slice of them.
   // Following the bottom unless scrolled up (pinTop: the first line shown).
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // The summary line under the mouse: an item's id, or "live" for the group still growing.
+  const [hover, setHover] = useState<number | "live" | null>(null);
   const [pinTop, setPinTop] = useState<number | null>(null);
   const [sel, setSel] = useState<{ a: Pos; b: Pos } | null>(null);
   const [flash, setFlash] = useState("");
@@ -1100,16 +1115,18 @@ function App(props: Props) {
   const areaH = useHeight(areaBox);
   const activityH = useHeight(activityBox) ?? 0;
   const viewH = Math.max(1, (areaH ?? rows - 6) - activityH);
-  const lineCache = useRef(new Map<number, { w: number; open: boolean; lines: string[] }>());
+  const lineCache = useRef(new Map<number, { w: number; open: boolean; hot: boolean; lines: string[] }>());
   const flat = useMemo(() => {
     const lines: string[] = [];
     const owner: number[] = [];
     if (!appDrawn) return { lines, owner };
     items.forEach((it, idx) => {
       const open = expanded.has(it.id) && !!it.entries;
+      const hot = hover === it.id && !!it.hot;
       let c = lineCache.current.get(it.id);
-      if (!c || c.w !== columns || c.open !== open) {
-        c = { w: columns, open, lines: open ? groupLines(it.b, it.entries!, columns) : blockLines(it.b, columns) };
+      if (!c || c.w !== columns || c.open !== open || c.hot !== hot) {
+        const b = hot ? it.hot! : it.b;
+        c = { w: columns, open, hot, lines: open ? groupLines(b, it.entries!, columns) : blockLines(b, columns) };
         lineCache.current.set(it.id, c);
       }
       for (const l of c.lines) {
@@ -1118,7 +1135,7 @@ function App(props: Props) {
       }
     });
     return { lines, owner };
-  }, [appDrawn, items, columns, expanded]);
+  }, [appDrawn, items, columns, expanded, hover]);
   const total = flat.lines.length;
   const bottomTop = Math.max(0, total - viewH);
   const top = pinTop === null ? bottomTop : Math.max(0, Math.min(pinTop, bottomTop));
@@ -1161,14 +1178,31 @@ function App(props: Props) {
   const onMouse = (m: Mouse) => {
     if (transcriptOpen) return;
     if (m.kind === "wheel") return scrollBy(m.button * 3);
-    if (m.button !== 0) return;
     const shown = Math.min(viewH, total - top); // rows of conversation on screen
+    // What a click here would open: a summary line, or the group still
+    // growing, which sits first under the conversation.
+    const target = (): number | "live" | null => {
+      if (m.y < shown) {
+        if (!atBottom && m.y === shown - 1) return null; // the pill
+        const it = items[flat.owner[top + m.y]];
+        return it?.entries ? it.id : null;
+      }
+      return liveGroup && m.y < shown + liveGroup.length ? "live" : null;
+    };
+    if (m.kind === "move") return setHover(target());
+    if (m.button !== 0) return;
+    if (m.kind === "release" && !drag.current?.moved && target() === "live") {
+      drag.current = null;
+      return setLiveOpen((o) => !o);
+    }
     const y = Math.max(0, Math.min(shown - 1, m.y));
     const at: Pos = { line: top + y, col: m.x };
     if (m.kind === "press") {
       drag.current = { from: at, moved: false };
       setSel(null);
     } else if (m.kind === "drag" && drag.current) {
+      // A hand that shakes a little while clicking is still a click.
+      if (at.line === drag.current.from.line && at.col === drag.current.from.col) return;
       drag.current.moved = true;
       setSel({ a: drag.current.from, b: at });
       if (m.y <= 0) scrollBy(-1);
@@ -1240,11 +1274,23 @@ function App(props: Props) {
   const openTodos = todos.some((t) => t.status !== "done") ? todos : [];
   const runningJobs = a.jobs.list().filter((j) => !j.exit).length;
 
+  // The quiet tool calls of the group still growing, drawn as lines when
+  // app-drawn so a click can find them.
+  const liveGroup = (() => {
+    if (!appDrawn || !groupLive || !(groupLive.text || groupLive.current)) return null;
+    const g = group.current;
+    const current = groupLive.current ? [ansi.gray(`  └ ${groupLive.current.slice(0, Math.max(20, columns - 8))}`)] : [];
+    if (!g) return ["", ...current];
+    const b = blocks.group(groupLive.text, g.failed, "click to expand", hover === "live");
+    return [...(liveOpen ? groupLines(b, g.entries, columns) : blockLines(b, columns)), ...current];
+  })();
+
   // What the model is doing right now. App-drawn, it sits under the last
   // line of the conversation; otherwise above the input.
   const activity = (
     <>
-      {groupLive && (groupLive.text || groupLive.current) && (
+      {liveGroup && <Text>{liveGroup.join("\n")}</Text>}
+      {!appDrawn && groupLive && (groupLive.text || groupLive.current) && (
         <BlockView
           b={{
             prefix: "  ",

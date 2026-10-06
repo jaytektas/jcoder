@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { PassThrough } from "node:stream";
 
 export interface Mouse {
-  kind: "press" | "release" | "drag" | "wheel";
+  kind: "press" | "release" | "drag" | "move" | "wheel";
   /** 0 left, 1 middle, 2 right; wheel: -1 up, 1 down. */
   button: number;
   /** 0-based cell. */
@@ -26,8 +26,8 @@ export interface Mouse {
 }
 
 // Clicks, drags and the wheel, in the SGR format (any size of terminal).
-const MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
-const MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
+const MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
+const MOUSE_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
 const SGR = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
 
 let restored = false;
@@ -61,7 +61,7 @@ export function mouseStdin(onMouse: (m: Mouse) => void): NodeJS.ReadStream {
       const code = Number(b);
       const m: Mouse = { kind: "press", button: code & 3, x: Number(x) - 1, y: Number(y) - 1 };
       if (code & 64) Object.assign(m, { kind: "wheel", button: code & 1 ? 1 : -1 });
-      else if (code & 32) m.kind = "drag";
+      else if (code & 32) m.kind = (code & 3) === 3 ? "move" : "drag";
       else if (end === "m") m.kind = "release";
       onMouse(m);
       return "";

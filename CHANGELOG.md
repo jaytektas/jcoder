@@ -1,5 +1,16 @@
 # Changes
 
+## 0.6.2
+
+- **Summary lines light up under the mouse, like a link.** Hovering a
+  `Ran 2 shell commands, read 3 files (click to expand)` line highlights
+  it, so it's clear it can be clicked.
+- **The summary still growing can be clicked open too.** While the model
+  is still running quiet commands, its summary line under the
+  conversation used to ignore clicks; it now opens in place, and stays
+  open once it's done.
+- A click that wobbles by a cell no longer turns into a text selection.
+
 ## 0.6.1
 
 - **What the model is doing sits under the conversation.** The tool
