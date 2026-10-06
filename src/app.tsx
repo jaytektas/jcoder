@@ -33,7 +33,7 @@ import { duration, preview } from "./ui.js";
 
 const MODES: Mode[] = ["edit", "auto", "ro"];
 const MODE_LABEL: Record<Mode, [string, string]> = {
-  edit: ["yellow", "⏵ edit · asks before commands"],
+  edit: ["yellow", "⏵ edit · asks before commands that change things"],
   auto: ["red", "⏵⏵ auto · asks nothing"],
   ro: ["green", "read-only"],
 };

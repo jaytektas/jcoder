@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.5
+
+- **Edit mode no longer asks before commands that only look.** `ls`,
+  `cat`, `grep`, `rg`, `find`, `head`/`tail`, `wc`, `git
+  status/log/diff/show` and the like run straight away, piped or chained
+  together too. jcoder still asks if anything in the command could change
+  something: another program, output written to a file, `$(…)` or
+  backticks, or an option like `find -delete` or `sort -o`.
+
 ## 0.6.4
 
 - **Sub-agents on other servers follow the mode you're in now.** They

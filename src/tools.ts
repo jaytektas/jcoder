@@ -335,6 +335,87 @@ const editFile: Tool = {
   },
 };
 
+// Commands that only look: edit mode runs these without asking.
+const LOOKS = new Set(
+  ("cat head tail wc ls tree pwd cd echo printf grep egrep fgrep rg find file stat du df which type whereis " +
+    "basename dirname realpath readlink cut tr sort uniq diff cmp comm column nl jq date whoami id uname nproc free ps uptime true").split(" "),
+);
+const GIT_LOOKS = new Set("status log diff show rev-parse ls-files ls-tree blame describe shortlog grep cat-file".split(" "));
+// Arguments that make a looking command write or run something.
+const WRITES_ARG: Record<string, RegExp> = {
+  find: /^-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/,
+  sort: /^(-[a-zA-Z]*o|--output)/,
+  rg: /^--pre/,
+  date: /^(-[a-zA-Z]*s|--set)/,
+  git: /^(--output|-O|--open-files-in-pager)/,
+};
+
+/**
+ * Whether a shell command only reads: every command in it (split on && || ; |)
+ * is a looking one, and nothing redirects output to a file or runs a
+ * command inside another. Anything it can't be sure of counts as a change.
+ */
+export function readOnly(cmd: string): boolean {
+  const segs: string[][] = [[]];
+  let word: string | null = null;
+  let quote = "";
+  const end = () => {
+    if (word !== null) segs[segs.length - 1].push(word);
+    word = null;
+  };
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote === "'") {
+      if (ch === "'") quote = "";
+      else word += ch;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && cmd[i + 1] === "(")) return false;
+    if (quote === '"') {
+      if (ch === '"') quote = "";
+      else if (ch === "\\" && i + 1 < cmd.length) word += cmd[++i];
+      else word += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      word ??= "";
+    } else if (ch === "\\" && i + 1 < cmd.length) word = (word ?? "") + cmd[++i];
+    else if (ch === " " || ch === "\t") end();
+    else if (ch === ";" || ch === "&" || ch === "|" || ch === "\n") {
+      end();
+      if (cmd[i + 1] === ch) i++;
+      segs.push([]);
+    } else if (ch === ">") {
+      // Only throwing output away or joining it with the other stream.
+      const rest = /^>\s*(&[12]|\/dev\/null)/.exec(cmd.slice(i));
+      if (!rest) return false;
+      end();
+      i += rest[0].length - 1;
+    } else if (ch === "<" || ch === "(" || ch === ")" || ch === "{" || ch === "}") return false;
+    else word = (word ?? "") + ch;
+  }
+  if (quote) return false;
+  end();
+  const cmds = segs.filter((s) => s.length);
+  return (
+    cmds.length > 0 &&
+    cmds.every((argv) => {
+      // A stream number left by 2>&1 or 2>/dev/null.
+      const args = argv.filter((a) => !/^[012]$/.test(a));
+      let [name, ...rest] = args;
+      if (name === "git") {
+        while (rest[0] === "--no-pager" || rest[0] === "-C") rest = rest.slice(rest[0] === "-C" ? 2 : 1);
+        if (!GIT_LOOKS.has(rest[0] ?? "")) return false;
+      } else if (!LOOKS.has(name)) return false;
+      // uniq's second file is where it writes.
+      if (name === "uniq" && rest.filter((a) => !a.startsWith("-")).length > 1) return false;
+      const writes = WRITES_ARG[name];
+      return !writes || !rest.some((a) => writes.test(a));
+    })
+  );
+}
+
 const bash: Tool = {
   schema: def(
     "bash",

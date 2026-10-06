@@ -105,7 +105,8 @@ Type while the model is working and your message is queued; it's sent when
 the model finishes.
 
 **Modes.** `edit` (the default) changes files freely and asks before running
-commands. `auto` asks nothing (also `/yolo`, or `jcoder --yolo`). `ro` reads
+commands, except ones that only look (`ls`, `cat`, `grep`, `find`,
+`git status/log/diff`, and the like, with no output written to a file). `auto` asks nothing (also `/yolo`, or `jcoder --yolo`). `ro` reads
 only. When jcoder asks, you can say no and type what to do instead; the
 model gets your reason.
 

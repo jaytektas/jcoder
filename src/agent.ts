@@ -15,7 +15,7 @@ import { DROP_DAYS, dropped, PRESETS, resolveAdvisors, type Advisor } from "./ad
 import { agentPrompt } from "./prompt.js";
 import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
-import { schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
+import { readOnly, schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
 import { duration, preview } from "./ui.js";
 import type { AgentStatus, View } from "./view.js";
 
@@ -621,6 +621,7 @@ export class Agent {
     const mode = this.cfg.mode;
     if (mode === "auto" || this.allowed.has(tool)) return { ok: true };
     if (mode === "edit" && (tool === "write_file" || tool === "edit_file")) return { ok: true };
+    if (mode === "edit" && tool === "bash" && readOnly(summary)) return { ok: true };
     const a = await this.view.approve(tool, summary);
     if (a.always) this.allowed.add(tool);
     return a;
