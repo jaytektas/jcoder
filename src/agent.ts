@@ -278,6 +278,8 @@ export class Agent {
       for (const s of this.cfg.agentServers.filter((s) => !s.disabled && s.baseUrl)) {
         const name = s.name ?? s.baseUrl.replace(/^https?:\/\//, "");
         const cfg: Config = { ...this.cfg, baseUrl: s.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, ""), apiKey: s.apiKey ?? "", model: s.model ?? "" };
+        // The mode is the user's now, not what it was when the pool was made.
+        Object.defineProperty(cfg, "mode", { get: () => this.cfg.mode, enumerable: true });
         try {
           if (!cfg.model) cfg.model = (await listModels(cfg))[0] ?? "";
           if (!cfg.model) throw new Error("it lists no models");

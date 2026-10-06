@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.4
+
+- **Sub-agents on other servers follow the mode you're in now.** They
+  kept the mode from when the first one started, so switching to auto
+  mid-session still left them asking before every command.
+
 ## 0.6.3
 
 - **The model says what it's doing.** It writes a short sentence before
