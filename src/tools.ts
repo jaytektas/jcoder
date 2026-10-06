@@ -345,13 +345,15 @@ const bash: Tool = {
       "Over ssh, detach long-lived processes (nohup cmd > log 2>&1 < /dev/null &) or the call hangs until the timeout.",
     {
       command: str("The command"),
+      description: str("What it does in a few plain words, shown to the user while it runs, e.g. \"Run the tests\""),
       timeout: int("Seconds before it is killed (max 600); not for background jobs"),
       background: { type: "boolean", description: "Run it in the background and return straight away" },
     },
     ["command"],
   ),
   writes: true,
-  summary: (a) => String(a.command),
+  // The description heads the line the user sees; the command follows under it.
+  summary: (a) => (a.description ? `${String(a.description).split("\n")[0]}\n${a.command}` : String(a.command)),
   async run(a, ctx) {
     const cmd = String(a.command ?? "");
     if (!cmd.trim()) return fail("command is empty.");

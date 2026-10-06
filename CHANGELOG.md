@@ -1,5 +1,16 @@
 # Changes
 
+## 0.6.3
+
+- **The model says what it's doing.** It writes a short sentence before
+  each step and when it finds something that changes the plan, so the
+  conversation reads as a running account instead of a long silent run
+  of tool calls.
+- **Shell commands say what they're for.** The bash tool takes a short
+  description ("Run the tests"), shown on the live line while the
+  command runs, with the command itself under it when you expand the
+  summary or press ctrl+o. Without one, the command shows as before.
+
 ## 0.6.2
 
 - **Summary lines light up under the mouse, like a link.** Hovering a
