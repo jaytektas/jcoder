@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.6
+
+- **grep no longer fails on a broad search over a big project.** Without
+  `rg` installed, a pattern like `trigger` over a whole tree could print
+  more than 64 MB, and the search was killed with just "grep failed". It
+  now streams the output, keeps the first 300 matches (each cut to 300
+  characters) and gives the total count. When it does fail, it says why.
+
 ## 0.6.5
 
 - **Edit mode no longer asks before commands that only look.** `ls`,

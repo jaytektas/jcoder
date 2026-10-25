@@ -660,17 +660,41 @@ const grep: Tool = {
       if (a.glob) args.push(`--include=${a.glob}`);
     }
     args.push("-e", String(a.pattern ?? ""), target);
-    const r = spawnSync(bin, args, { cwd: ctx.cwd, encoding: "utf8", maxBuffer: 64 << 20 });
-    if (r.status === 1) return { content: "No matches.", display: "no matches" };
-    if (r.status !== 0) return fail(r.stderr.trim() || `${bin} failed`);
-    const lines = r.stdout
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => (l.startsWith(ctx.cwd + "/") ? l.slice(ctx.cwd.length + 1) : l));
-    const shown = lines.slice(0, 300);
-    let out = shown.join("\n");
-    if (lines.length > shown.length) out += `\n\n(${lines.length} matches, first 300 shown; narrow the search)`;
-    return { content: cap(out, ctx.maxChars), display: `${lines.length} matches` };
+    // Streamed, not buffered: a broad pattern over a big tree (minified bundles, generated
+    // indexes) can print hundreds of MB, and spawnSync kills the search at its buffer limit.
+    // Only the first 300 lines are kept; the rest are just counted.
+    const r = await new Promise<{ code: number | null; error?: Error; shown: string[]; count: number; stderr: string }>((done) => {
+      const p = spawn(bin, args, { cwd: ctx.cwd, signal: ctx.signal });
+      const shown: string[] = [];
+      let count = 0, rest = "", stderr = "";
+      const take = (l: string) => {
+        if (!l) return;
+        count++;
+        if (shown.length >= 300) return;
+        if (l.startsWith(ctx.cwd + "/")) l = l.slice(ctx.cwd.length + 1);
+        shown.push(l.length > 300 ? l.slice(0, 300) + " …(line cut)" : l);
+      };
+      p.stdout.setEncoding("utf8").on("data", (s: string) => {
+        const parts = (rest + s).split("\n");
+        rest = parts.pop()!;
+        parts.forEach(take);
+      });
+      p.stderr.setEncoding("utf8").on("data", (s: string) => {
+        if (stderr.length < 4000) stderr += s;
+      });
+      p.on("error", (error) => done({ code: null, error, shown, count, stderr }));
+      p.on("close", (code) => {
+        take(rest);
+        done({ code, shown, count, stderr });
+      });
+    });
+    if (r.error) return fail(ctx.signal.aborted ? "Stopped." : `${bin}: ${r.error.message}`);
+    if (r.code === 1 && !r.count) return { content: "No matches.", display: "no matches" };
+    // grep exits 2 on an unreadable file even when it found matches; keep what it found.
+    if (r.code !== 0 && !r.count) return fail(r.stderr.trim() || `${bin} exited with ${r.code}`);
+    let out = r.shown.join("\n");
+    if (r.count > r.shown.length) out += `\n\n(${r.count} matches, first 300 shown; narrow the search)`;
+    return { content: cap(out, ctx.maxChars), display: `${r.count} matches` };
   },
 };
 
