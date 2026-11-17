@@ -659,53 +659,174 @@ const agentTool: Tool = {
   },
 };
 
-const hasRg = spawnSync("rg", ["--version"]).status === 0;
+/** True when cmd runs and exits 0 (fed input on stdin, if given). */
+function runs(cmd: string, args: string[], input?: string): boolean {
+  try {
+    return spawnSync(cmd, args, { input, timeout: 5000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+const hasRg = runs("rg", ["--version"]);
+const hasGit = runs("git", ["--version"]);
+// GNU grep's -E reads \d as a plain "d" without complaint, so a model's \d+ silently
+// finds the wrong lines. -P (PCRE) uses the same syntax as rg; -E is the last resort.
+const grepRegex = runs("grep", ["-P", "a\\d"], "a1\n") ? "-P" : "-E";
 const SKIP_DIRS = [".git", "node_modules", "dist", "build", ".venv", "__pycache__", "target"];
+/** A search that runs longer than this is stopped and returns what it found so far. */
+const SEARCH_SECONDS = 60;
+/** Results shown to the model; the rest are only counted. */
+const MAX_SHOWN = 300;
+
+const NETWORK_FS = /^(fuse\.(sshfs|rclone|s3fs|gcsfuse|davfs|curlftpfs)|sshfs|nfs4?|cifs|smb3?|smbfs|9p|afs|ceph|glusterfs|davfs)$/;
+
+/**
+ * Network mounts strictly inside dir, e.g. an sshfs share under ~. Searching
+ * across one reads every file over the network and can take many minutes, so
+ * grep and glob skip them unless the search starts inside the mount itself.
+ */
+function networkMountsUnder(dir: string): string[] {
+  let text: string;
+  try {
+    text = fs.readFileSync("/proc/self/mounts", "utf8");
+  } catch {
+    return []; // not Linux
+  }
+  const root = dir.endsWith("/") ? dir : dir + "/";
+  const found = new Set<string>();
+  for (const line of text.split("\n")) {
+    const [, rawPoint, type] = line.split(" ");
+    if (!rawPoint || !NETWORK_FS.test(type ?? "")) continue;
+    // /proc/self/mounts escapes space, tab, newline and backslash as octal.
+    const point = rawPoint.replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)));
+    if (point.startsWith(root)) found.add(point);
+  }
+  return [...found].sort();
+}
+
+function inGitWorkTree(dir: string): boolean {
+  if (!hasGit) return false;
+  const r = spawnSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8", timeout: 10000 });
+  return r.status === 0 && r.stdout.trim() === "true";
+}
+
+type GrepOutput = "files" | "content" | "count";
+
+/**
+ * The same search whichever engine is installed: rg if there is one; in a git
+ * repo, git grep (it honours .gitignore); otherwise GNU grep. All three skip
+ * hidden and ignored files, build output and network mounts, and use
+ * Perl-style regexes.
+ */
+function grepCommand(
+  target: string,
+  isDir: boolean,
+  mounts: string[],
+  o: { pattern: string; output: GrepOutput; context: number; literal: boolean; ignoreCase: boolean; glob?: string },
+): { bin: string; args: string[]; cwd?: string; prefix: string } {
+  const mode = o.output === "files" ? ["-l"] : o.output === "count" ? ["-c"] : ["-n", ...(o.context ? ["-C", String(o.context)] : [])];
+  if (hasRg) {
+    // --no-require-git: honour .gitignore in a checkout even where git isn't installed.
+    const args = ["--color=never", "--no-heading", "--with-filename", "--no-require-git", ...mode];
+    if (o.output === "content") args.push("-M", "300");
+    if (o.literal) args.push("-F");
+    if (o.ignoreCase) args.push("-i");
+    if (o.glob) args.push("-g", o.glob);
+    for (const d of SKIP_DIRS) args.push("-g", `!${d}/`);
+    // rg globs are relative to the search root; a leading / anchors them there.
+    for (const m of mounts) args.push("-g", `!/${path.relative(target, m)}/`);
+    return { bin: "rg", args: [...args, "-e", o.pattern, target], prefix: "" };
+  }
+  if (isDir && inGitWorkTree(target)) {
+    // Tracked files plus untracked ones that aren't ignored. Paths come back relative to target.
+    const args = ["grep", "--untracked", "--exclude-standard", "-I", "--color=never", ...mode, o.literal ? "-F" : "-P"];
+    if (o.ignoreCase) args.push("-i");
+    args.push("-e", o.pattern, "--");
+    if (o.glob) args.push(o.glob); // a pathspec's * also matches /, so *.ts finds them at any depth
+    return { bin: "git", args, cwd: target, prefix: target + "/" };
+  }
+  const args = ["-r", "-I", "-H", "--color=never", ...mode, o.literal ? "-F" : grepRegex];
+  // --include goes first: a file no include/exclude matches is searched only when the
+  // first of them is an --exclude, so after one it would let every other file through.
+  if (o.glob) args.push(`--include=${o.glob}`);
+  args.push(...SKIP_DIRS.map((d) => `--exclude-dir=${d}`));
+  // grep tests these against every suffix of a path given on the command line, so a
+  // search started inside a hidden directory (~/.config/x) would skip itself.
+  if (!target.split("/").some((part) => part.startsWith(".") && part !== "." && part !== "..")) {
+    args.push("--exclude-dir=.*", "--exclude=.*");
+  }
+  // grep only matches --exclude-dir against a directory's own name, not its path.
+  for (const m of mounts) args.push(`--exclude-dir=${path.basename(m)}`);
+  if (o.ignoreCase) args.push("-i");
+  return { bin: "grep", args: [...args, "-e", o.pattern, target], prefix: "" };
+}
 
 const grep: Tool = {
   schema: def(
     "grep",
-    "Search file contents with a regular expression. Returns path:line:text.",
+    "Search file contents with a regular expression (Perl/ripgrep syntax: \\d, \\w, \\s, \\b, (?i) work). " +
+      'By default lists the files that match; set output to "content" for path:line:text lines (add context for ' +
+      'lines around each match) or "count" for matches per file. Skips hidden files, .gitignored files, ' +
+      "node_modules and build output, and network mounts.",
     {
-      pattern: str("Regular expression (extended syntax)"),
+      pattern: str("Regular expression, or plain text if literal is true"),
       path: str("File or directory to search (default: project)"),
       glob: str("Only files matching this, e.g. *.ts"),
+      output: { type: "string", enum: ["files", "content", "count"], description: "files (default), content or count" },
+      context: int('Lines to show before and after each match (output "content" only, max 20)'),
+      literal: { type: "boolean", description: "Treat pattern as plain text, so ( . * [ need no escaping" },
       ignore_case: { type: "boolean", description: "Case-insensitive" },
     },
     ["pattern"],
   ),
   writes: false,
-  summary: (a) => `${a.pattern}${a.path ? `  ${a.path}` : ""}${a.glob ? `  (${a.glob})` : ""}`,
+  summary: (a) =>
+    `${a.pattern}${a.path ? `  ${a.path}` : ""}${a.glob ? `  (${a.glob})` : ""}` +
+    (a.output && a.output !== "files" ? `  [${a.output}]` : ""),
   async run(a, ctx) {
     const target = a.path ? resolve(ctx, String(a.path)) : ctx.cwd;
-    const args: string[] = [];
-    let bin: string;
-    if (hasRg) {
-      bin = "rg";
-      args.push("-n", "--no-heading", "--color=never", "-M", "300");
-      if (a.ignore_case) args.push("-i");
-      if (a.glob) args.push("-g", String(a.glob));
-    } else {
-      bin = "grep";
-      args.push("-rnIE", "--color=never", ...SKIP_DIRS.map((d) => `--exclude-dir=${d}`));
-      if (a.ignore_case) args.push("-i");
-      if (a.glob) args.push(`--include=${a.glob}`);
+    let isDir: boolean;
+    try {
+      isDir = fs.statSync(target).isDirectory();
+    } catch {
+      return fail(`${a.path ?? target} doesn't exist.`);
     }
-    args.push("-e", String(a.pattern ?? ""), target);
+    const output: GrepOutput = a.output === "content" || a.output === "count" ? a.output : "files";
+    const mounts = isDir ? networkMountsUnder(target) : [];
+    const { bin, args, cwd, prefix } = grepCommand(target, isDir, mounts, {
+      pattern: String(a.pattern ?? ""),
+      output,
+      context: output === "content" ? Math.min(20, Math.max(0, Math.floor(Number(a.context) || 0))) : 0,
+      literal: a.literal === true || a.literal === "true",
+      ignoreCase: a.ignore_case === true || a.ignore_case === "true",
+      glob: a.glob ? String(a.glob) : undefined,
+    });
+    // Stopped by the user (esc) or by the time limit, whichever comes first.
+    const timeLimit = AbortSignal.timeout(SEARCH_SECONDS * 1000);
+    const signal = AbortSignal.any([ctx.signal, timeLimit]);
     // Streamed, not buffered: a broad pattern over a big tree (minified bundles, generated
     // indexes) can print hundreds of MB, and spawnSync kills the search at its buffer limit.
-    // Only the first 300 lines are kept; the rest are just counted.
-    const r = await new Promise<{ code: number | null; error?: Error; shown: string[]; count: number; stderr: string }>((done) => {
-      const p = spawn(bin, args, { cwd: ctx.cwd, signal: ctx.signal });
-      const shown: string[] = [];
-      let count = 0, rest = "", stderr = "";
-      const take = (l: string) => {
-        if (!l) return;
-        count++;
-        if (shown.length >= 300) return;
+    const shown: string[] = [];
+    let count = 0, total = 0;
+    const take = (l: string) => {
+      if (!l) return;
+      if (l !== "--") {
+        if (output === "count") {
+          const n = Number(/:(\d+)$/.exec(l)?.[1] ?? 0);
+          if (!n) return; // grep -c lists every file it read, matched or not
+          total += n;
+        }
+        l = prefix + l;
         if (l.startsWith(ctx.cwd + "/")) l = l.slice(ctx.cwd.length + 1);
-        shown.push(l.length > 300 ? l.slice(0, 300) + " …(line cut)" : l);
-      };
+        count++;
+      }
+      if (shown.length >= MAX_SHOWN) return;
+      shown.push(l.length > 300 ? l.slice(0, 300) + " …(line cut)" : l);
+    };
+    const r = await new Promise<{ code: number | null; error?: Error; stderr: string }>((done) => {
+      // SIGKILL: a grep stuck reading a slow network file may not act on SIGTERM.
+      const p = spawn(bin, args, { cwd: cwd ?? ctx.cwd, signal, killSignal: "SIGKILL" });
+      let rest = "", stderr = "";
       p.stdout.setEncoding("utf8").on("data", (s: string) => {
         const parts = (rest + s).split("\n");
         rest = parts.pop()!;
@@ -714,19 +835,43 @@ const grep: Tool = {
       p.stderr.setEncoding("utf8").on("data", (s: string) => {
         if (stderr.length < 4000) stderr += s;
       });
-      p.on("error", (error) => done({ code: null, error, shown, count, stderr }));
+      p.on("error", (error) => done({ code: null, error, stderr }));
       p.on("close", (code) => {
         take(rest);
-        done({ code, shown, count, stderr });
+        done({ code, stderr });
       });
     });
-    if (r.error) return ctx.signal.aborted ? { content: "Stopped." } : fail(`${bin}: ${r.error.message}`);
-    if (r.code === 1 && !r.count) return { content: "No matches.", display: "no matches" };
+    if (ctx.signal.aborted) return { content: "Stopped." };
+    if (output === "files") shown.sort();
+    const unit = output === "content" ? "lines" : "files";
+    const tally = output === "count" ? `${total} matches in ${count} files` : `${count} ${unit}`;
+    const skipped = mounts.length
+      ? `\n\n(Skipped network mounts: ${mounts.map((m) => rel(ctx, m)).join(", ")}. Searching them is slow; pass one as path to search it.)`
+      : "";
+    if (timeLimit.aborted) {
+      const found = shown.length ? shown.join("\n") + "\n\n" : "";
+      return {
+        content: cap(
+          `${found}(Search stopped after ${SEARCH_SECONDS}s with ${tally} so far; the tree is too big or too slow. Narrow path or glob.)${skipped}`,
+          ctx.maxChars,
+        ),
+        display: `timed out, ${tally}`,
+      };
+    }
+    if (r.error) return fail(`${bin}: ${r.error.message}`);
+    if (r.code === 1 && !count) return { content: "No matches." + skipped, display: "no matches" };
     // grep exits 2 on an unreadable file even when it found matches; keep what it found.
-    if (r.code !== 0 && !r.count) return fail(r.stderr.trim() || `${bin} exited with ${r.code}`);
-    let out = r.shown.join("\n");
-    if (r.count > r.shown.length) out += `\n\n(${r.count} matches, first 300 shown; narrow the search)`;
-    return { content: cap(out, ctx.maxChars), display: `${r.count} matches` };
+    if (r.code !== 0 && !count) {
+      const hint = a.literal === true || a.literal === "true" ? "" : "\n(If the pattern is plain text, set literal: true.)";
+      return fail((r.stderr.trim() || `${bin} exited with ${r.code}`) + hint);
+    }
+    let out = shown.join("\n");
+    if (count > shown.length || shown.length >= MAX_SHOWN) {
+      out += `\n\n(${tally}, first ${MAX_SHOWN} ${output === "content" ? "lines" : "files"} shown; narrow the search)`;
+    } else if (output === "count") {
+      out += `\n\n(${tally})`;
+    }
+    return { content: cap(out + skipped, ctx.maxChars), display: tally };
   },
 };
 
@@ -742,10 +887,11 @@ const glob: Tool = {
   async run(a, ctx) {
     const base = a.path ? resolve(ctx, String(a.path)) : ctx.cwd;
     let files: string[];
+    const mounts = new Set(networkMountsUnder(base));
     try {
       files = fs.globSync(String(a.pattern ?? "*"), {
         cwd: base,
-        exclude: (p: string) => SKIP_DIRS.includes(path.basename(p)),
+        exclude: (p: string) => SKIP_DIRS.includes(path.basename(p)) || mounts.has(path.resolve(base, p)),
       });
     } catch (e: any) {
       return fail(e.message);

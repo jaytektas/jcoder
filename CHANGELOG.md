@@ -1,5 +1,23 @@
 # Changes
 
+## 0.6.9
+
+- **grep can't hang on a network mount any more.** Searches skip sshfs,
+  NFS, SMB and other network mounts below the search folder (the model is
+  told which, and can search one by giving it as the path), and any search
+  is stopped after 60 seconds with what it found so far. Running jcoder in
+  `~` with a share mounted under it used to make a broad grep read the
+  whole share over the network. `glob` skips network mounts too.
+- **grep works like a search tool should.** By default it lists the
+  files that match; `output: "content"` gives the lines, with `context`
+  lines around each match, and `output: "count"` gives matches per file.
+  `literal: true` searches for plain text, so `foo(` needs no escaping.
+- **grep behaves the same whatever is installed.** Patterns are
+  Perl/ripgrep style everywhere: without ripgrep, GNU grep used to read
+  `\d` as the letter "d" and quietly find the wrong lines. Hidden files
+  are skipped with every engine, and `.gitignore`d files are skipped by
+  rg, and by git grep, which is used in a git repo when rg isn't installed.
+
 ## 0.6.8
 
 - **"failed" means failed.** A shell command that exits non-zero is no
