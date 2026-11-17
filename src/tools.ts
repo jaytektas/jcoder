@@ -568,14 +568,43 @@ const askUser: Tool = {
     ["question"],
   ),
   writes: false,
-  summary: (a) => String(a.question),
+  summary: (a) => askItems(a).map((q) => q.question).join(" / "),
   async run(a, ctx) {
-    const options = Array.isArray(a.options) ? a.options.map(String).slice(0, 8) : [];
-    const answer = await ctx.ask(String(a.question ?? ""), options);
-    if (answer === null) return { content: "The user didn't answer. Decide yourself, and say what you assumed.", display: "no answer" };
-    return { content: `The user answered: ${answer}`, display: answer };
+    // Models trained on other agents sometimes send {questions: [{question, options}, ...]}: ask each in turn.
+    const items = askItems(a);
+    if (!items.length) return fail('ask_user needs a "question" (string) and optional "options" (array of strings).');
+    const answers: string[] = [];
+    for (const q of items) {
+      const answer = await ctx.ask(q.question, q.options);
+      if (answer === null) {
+        if (!answers.length) return { content: "The user didn't answer. Decide yourself, and say what you assumed.", display: "no answer" };
+        answers.push("(no answer)");
+      } else answers.push(answer);
+    }
+    if (items.length === 1) return { content: `The user answered: ${answers[0]}`, display: answers[0] };
+    return {
+      content: items.map((q, i) => `Q: ${q.question}\nA: ${answers[i]}`).join("\n\n"),
+      display: answers.join(" / "),
+    };
   },
 };
+
+/** The questions in an ask_user call, in either the flat or the {questions: [...]} shape. */
+function askItems(a: any): { question: string; options: string[] }[] {
+  const opt = (o: any) => (typeof o === "string" ? o : String(o?.label ?? o?.text ?? o?.value ?? JSON.stringify(o)));
+  const one = (q: any) => {
+    if (typeof q === "string") return { question: q.trim(), options: [] };
+    const question = String(q?.question ?? q?.text ?? "").trim();
+    const options = Array.isArray(q?.options) ? q.options.map(opt).slice(0, 8) : [];
+    return { question, options };
+  };
+  let qs = a?.questions;
+  if (typeof qs === "string") {
+    try { qs = JSON.parse(qs); } catch { qs = [qs]; }
+  }
+  const list = Array.isArray(qs) ? qs.map(one) : [one(a)];
+  return list.filter((q) => q.question);
+}
 
 const askModel: Tool = {
   schema: def(
