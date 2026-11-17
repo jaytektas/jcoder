@@ -1,5 +1,18 @@
 # Changes
 
+## 0.6.10
+
+- **A slightly wrong tool call no longer ends the turn.** Local models now
+  and then call `read` for `read_file`, or leave the call in the reply as
+  `<tool_call><function=…>` text the server couldn't parse. The server
+  then ends the reply, and the turn stopped there with the raw call on
+  screen and nothing run. Now near-miss names (`read`, `edit`,
+  `functions.read_file`, `mcp__x__write_file`, `shell`, …) are mapped to
+  the tool they mean, and a call written as text (Qwen XML or Hermes JSON)
+  is taken out of the reply and run, with numbers and booleans typed from
+  the tool's schema. A text call that names no tool gets one reminder of
+  the real tool names so the model can try again.
+
 ## 0.6.9
 
 - **grep can't hang on a network mount any more.** Searches skip sshfs,

@@ -16,6 +16,7 @@ import { agentPrompt } from "./prompt.js";
 import { log as writeLog, saveSession, storeContent, type Session } from "./session.js";
 import { Jobs } from "./jobs.js";
 import { readOnly, schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
+import { resolveToolName, textToolCalls } from "./recover.js";
 import { duration, preview } from "./ui.js";
 import type { AgentStatus, View } from "./view.js";
 
@@ -388,11 +389,13 @@ export class Agent {
     const signal = this.abort.signal;
     const started = Date.now();
     this.calls = 0;
+    let nudged = false;
     try {
       for (;;) {
         if (this.used > this.cfg.compactAt * this.contextWindow) await this.compact(signal, true);
         const reply = await this.generate(signal);
         if (!reply) break;
+        this.recoverCalls(reply);
         final = reply.content;
         this.log({
           type: "assistant",
@@ -413,7 +416,18 @@ export class Agent {
           this.view.notice("The reply hit the server's length limit, or the context is full.", "warn");
           break;
         }
-        if (!reply.toolCalls.length) break;
+        if (!reply.toolCalls.length) {
+          // A call left in the text that names no tool: say so once and let the model try again.
+          if (!nudged && /<tool_call>|<function=/.test(reply.content)) {
+            nudged = true;
+            const ask = `[Your tool call came through as text and wasn't run: it names no tool. The tools are ${this.tools.map((t) => t.function.name).join(", ")}. Make the call again with one of them.]`;
+            this.view.notice("The model wrote a tool call as text; asking it to retry.", "warn");
+            this.messages.push({ role: "user", content: ask });
+            this.log({ type: "user", content: ask });
+            continue;
+          }
+          break;
+        }
         await this.runTools(reply.toolCalls, signal);
         // Saved as it goes, so a crash or a kill mid-turn keeps the work done so far.
         if (!this.sub) saveSession(this.session);
@@ -447,6 +461,27 @@ export class Agent {
       stopped: signal.aborted,
     });
     return final;
+  }
+
+  /**
+   * Repairs tool calls a model got slightly wrong, before they're recorded:
+   * a near-miss name (`read` for `read_file`) is mapped to the tool it means,
+   * and a call left in the reply's text (the server couldn't parse it, or the
+   * name matched nothing) is taken out of the text and run. Without this the
+   * turn ended with the raw <tool_call> on screen and nothing run.
+   */
+  private recoverCalls(reply: Reply) {
+    const offered = this.tools.map((t) => t.function.name);
+    for (const c of reply.toolCalls) {
+      const name = resolveToolName(c.function.name, offered);
+      if (name && name !== c.function.name) c.function.name = name;
+    }
+    if (reply.toolCalls.length || reply.finish === "length") return;
+    const found = textToolCalls(reply.content, this.tools);
+    if (!found) return;
+    reply.content = found.rest;
+    reply.toolCalls = found.calls;
+    reply.finish = "tool_calls";
   }
 
   status(): string {
