@@ -1,5 +1,15 @@
 # Changes
 
+## 0.6.8
+
+- **"failed" means failed.** A shell command that exits non-zero is no
+  longer shown in red or counted as failed: `grep` finding nothing, `ls`
+  of a missing path or a `curl` that can't connect exit non-zero after
+  running fine, and most "failed" lines were that. The model still sees
+  the exit code. Red is kept for real failures: a command killed after
+  the time limit, a tool error. Stopping the model (esc, ctrl+s) no
+  longer marks the stopped tool calls as failed either.
+
 ## 0.6.7
 
 - **Ctrl+S sends a message now.** While the model is working, Enter still

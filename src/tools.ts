@@ -485,7 +485,10 @@ const bash: Tool = {
         child.stderr.destroy();
         const status = why || `exit ${code}`;
         const body = out.trim() ? cap(out.replace(/\s+$/, ""), ctx.maxChars) : "(no output)";
-        done({ content: `${body}\n[${status}]`, error: why !== "" || code !== 0 });
+        // A non-zero exit isn't a failure on screen: grep finding nothing, ls of a
+        // missing path or the last test in a chain all exit 1 after doing their
+        // job. The model still sees [exit N]. Red is for a timeout.
+        done({ content: `${body}\n[${status}]`, error: why !== "" && !ctx.signal.aborted });
       };
       child.on("exit", (code) => setTimeout(() => finish(code), 200));
       child.on("close", (code) => finish(code));
@@ -717,7 +720,7 @@ const grep: Tool = {
         done({ code, shown, count, stderr });
       });
     });
-    if (r.error) return fail(ctx.signal.aborted ? "Stopped." : `${bin}: ${r.error.message}`);
+    if (r.error) return ctx.signal.aborted ? { content: "Stopped." } : fail(`${bin}: ${r.error.message}`);
     if (r.code === 1 && !r.count) return { content: "No matches.", display: "no matches" };
     // grep exits 2 on an unreadable file even when it found matches; keep what it found.
     if (r.code !== 0 && !r.count) return fail(r.stderr.trim() || `${bin} exited with ${r.code}`);

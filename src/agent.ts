@@ -310,7 +310,7 @@ export class Agent {
     if (!ep) {
       view.close();
       this.view.agentUpdate(id, null);
-      return { content: "Not run: the user interrupted.", error: true };
+      return { content: "Not run: the user interrupted." };
     }
     {
       const cwd = this.session.cwd;
@@ -327,7 +327,7 @@ export class Agent {
         const report = await agent.turn(task);
         const secs = Math.round((Date.now() - started) / 1000);
         const summary = `"${description}"${where ? ` on ${where}` : ""} · ${duration(secs)} · ${view.tools} tool call${view.tools === 1 ? "" : "s"}`;
-        if (signal.aborted) return { content: "The user interrupted the agent.", display: `stopped after ${summary}`, error: true };
+        if (signal.aborted) return { content: "The user interrupted the agent.", display: `stopped after ${summary}` };
         if (!report.trim()) return { content: "The agent finished without a report.", display: `no report · ${summary}`, error: true };
         return { content: `Report from the agent ("${description}"):\n\n${report}`, display: `${summary}\n${preview(report, 4)}` };
       } finally {
@@ -537,7 +537,8 @@ export class Agent {
   }
 
   private async runTools(calls: ToolCall[], signal: AbortSignal): Promise<void> {
-    const interrupted: ToolResult = { content: "Not run: the user interrupted.", error: true };
+    // Stopping isn't failing: not shown in red or counted as failed.
+    const interrupted: ToolResult = { content: "Not run: the user interrupted." };
     for (let i = 0; i < calls.length; ) {
       // Agent calls side by side run at the same time; everything else in turn.
       let j = i + 1;
