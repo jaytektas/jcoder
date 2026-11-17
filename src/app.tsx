@@ -864,6 +864,7 @@ function App(props: Props) {
                   ansi.gray("pgup/pgdn      scroll · ctrl+end back to the bottom · shift+drag: the terminal's own selection"),
                 ]
               : []),
+            ansi.gray("ctrl+s         send now: stop the model and send this message straight away"),
             ansi.gray("esc            close /btw, else stop the model · ctrl+d quit"),
             ansi.gray(`settings: ${tilde(path.join(path.dirname(USER_TEMPLATE), "config.json"))}`),
           ].join("\n"),
@@ -1098,6 +1099,17 @@ function App(props: Props) {
       return;
     }
     setQueue((q) => [...q, line]);
+  };
+
+  // ctrl+s: stop the running turn and send this next, ahead of anything queued.
+  const onSubmitNow = (text: string) => {
+    const line = text.trim();
+    if (!agentRef.current.running || (line.startsWith("/") && !line.includes("\n"))) return onSubmit(text);
+    setExitArmed(false);
+    setPinTop(null);
+    queueRef.current = [line, ...queueRef.current];
+    setQueue((q) => [line, ...q]);
+    agentRef.current.stop();
   };
 
   // ---------- the app-drawn screen ----------
@@ -1440,8 +1452,9 @@ function App(props: Props) {
         <Editor
           active={editorActive}
           cwd={cwd}
-          placeholder={a.running ? "type to queue a message" : undefined}
+          placeholder={a.running ? "type to queue a message · ctrl+s sends it now" : undefined}
           onSubmit={onSubmit}
+          onSubmitNow={onSubmitNow}
           onRecall={() => {
             // Queued messages come back as one, to edit and send again.
             if (!queue.length) return null;

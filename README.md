@@ -98,11 +98,13 @@ terminal scrollback, so your mouse wheel and Shift+PgUp work as usual.
 | Shift+Tab | cycle the mode: edit → auto → read-only |
 | Ctrl+T | show or hide the model's thinking |
 | `\` + Enter | new line (Alt+Enter and Ctrl+J too) |
+| Ctrl+S | send now: stop the model and send the message straight away |
 | ↑ | take back queued messages to edit them, otherwise history |
 | Ctrl+C twice, Ctrl+D | quit |
 
 Type while the model is working and your message is queued; it's sent when
-the model finishes.
+the model finishes (or between tool calls). Ctrl+S sends it now instead: the
+model is stopped and your message goes next.
 
 **Modes.** `edit` (the default) changes files freely and asks before running
 commands, except ones that only look (`ls`, `cat`, `grep`, `find`,

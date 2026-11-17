@@ -56,6 +56,8 @@ export interface EditorProps {
   placeholder?: string;
   /** Returns false to keep the text (nothing was sent). */
   onSubmit(text: string): boolean | void;
+  /** ctrl+s: send now, interrupting the model if it's working. */
+  onSubmitNow?(text: string): boolean | void;
   /** Ctrl+V: text to insert, e.g. "[image #1]", or null. */
   onCtrlV?(): string | null;
   /** Ctrl+C with nothing typed. */
@@ -112,11 +114,11 @@ export function Editor(p: EditorProps) {
     return v;
   };
 
-  const submit = (raw: string) => {
+  const submit = (raw: string, now = false) => {
     let text = raw;
     for (const [marker, full] of pastes) text = text.split(marker).join(full);
     if (!text.trim()) return;
-    if (p.onSubmit(text) === false) return;
+    if ((now && p.onSubmitNow ? p.onSubmitNow(text) : p.onSubmit(text)) === false) return;
     if (p.keepHistory !== false) remember(raw.includes("[Pasted text #") ? text : raw);
     pastes.clear();
     setHistIdx(-1);
@@ -247,6 +249,8 @@ export function Editor(p: EditorProps) {
             const w = wordLeft(cursor);
             return set(value.slice(0, w) + value.slice(cursor), w);
           }
+          case "s":
+            return submit(value, true);
           case "v": {
             const t = p.onCtrlV?.();
             if (t) insert(t);

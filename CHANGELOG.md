@@ -1,5 +1,18 @@
 # Changes
 
+## 0.6.7
+
+- **Ctrl+S sends a message now.** While the model is working, Enter still
+  queues your message; Ctrl+S stops the model and sends it straight away,
+  ahead of anything already queued. With the model idle it's the same as
+  Enter.
+- **ask_user works with models that ask several questions at once.** Some
+  models send `{"questions": [{question, options}, …]}`, the shape other
+  coding agents use; jcoder read only `question`, so it showed an empty
+  prompt and the turn hung. Now each question is asked in turn and the
+  answers go back together. A call with no question gets an error that
+  says what to send instead of a blank prompt.
+
 ## 0.6.6
 
 - **grep no longer fails on a broad search over a big project.** Without
