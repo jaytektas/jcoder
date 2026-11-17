@@ -1,5 +1,19 @@
 # Changes
 
+## 0.6.11
+
+- **`/goal`: keep working until it's done.** `/goal <condition>` sets a
+  goal and starts on it. After each turn the model is asked, without
+  tools and outside the conversation, whether the evidence so far (tool
+  output, not claims) shows the goal met. If it isn't met, the next turn
+  starts on its own with what's missing. `--check <command>` lets a command
+  decide instead: the goal is met when it exits 0. A goal stops when it's
+  met, after `goalMaxTurns` turns (20), or after two turns with no tool
+  calls. esc pauses it, `/goal` shows it, `/goal clear` drops it, and the
+  status line shows `◎ goal n/20` while one is set. It survives
+  compaction. From a script, `jcoder --goal "…" [--goal-check "cmd"]` runs
+  the same loop and exits 0 if the goal was met and 2 if not.
+
 ## 0.6.10
 
 - **A slightly wrong tool call no longer ends the turn.** Local models now

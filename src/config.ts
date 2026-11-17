@@ -61,6 +61,8 @@ export interface Config {
   slots: number;
   /** Tool calls a sub-agent may make: told to wrap up at two thirds, then stopped for its report. */
   agentMaxTools: number;
+  /** Turns /goal may take before it gives up on a goal that isn't met. */
+  goalMaxTurns: number;
   /** Seconds a bash command may run when the model doesn't say (it can ask for up to 600). */
   bashTimeout: number;
   /** Compact the conversation when the prompt passes this share of the window. */
@@ -123,6 +125,7 @@ export const DEFAULTS: Config = {
   maxAgents: -1,
   slots: 0,
   agentMaxTools: 45,
+  goalMaxTurns: 20,
   agentServers: [],
   agentsOnMain: true,
   searchUrl: "",
@@ -184,7 +187,7 @@ export function saveConfig(cfg: Config): void {
 }
 
 /** Settings that take effect at once when changed with /setting; the rest at the next start. */
-export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "keepThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "agentMaxTools", "extraBody", "sampling"]);
+export const LIVE_SETTINGS = new Set<keyof Config>(["effort", "showThinking", "keepThinking", "mode", "maxToolChars", "bashTimeout", "compactAt", "dropAdvisors", "maxAgents", "agentMaxTools", "goalMaxTurns", "extraBody", "sampling"]);
 
 const CHOICES: Partial<Record<keyof Config, readonly string[]>> = {
   effort: EFFORTS,
@@ -215,6 +218,7 @@ export function parseSetting(key: keyof Config, text: string): { value: unknown 
     if (key === "compactAt" && !(n > 0 && n <= 1)) return { error: "compactAt is a share of the window, above 0 and up to 1 (e.g. 0.85)" };
     if (key === "slots" && (!Number.isInteger(n) || n < 0)) return { error: "slots is 0 (what the server reports) or a number" };
     if (key === "agentMaxTools" && (!Number.isInteger(n) || n < 1)) return { error: "agentMaxTools is a whole number above 0" };
+    if (key === "goalMaxTurns" && (!Number.isInteger(n) || n < 1)) return { error: "goalMaxTurns is a whole number above 0" };
     if (key !== "maxAgents" && key !== "slots" && n <= 0) return { error: `${key} is above 0` };
     return { value: n };
   }

@@ -13,6 +13,7 @@ import { restoreNodeEnv } from "./production.js"; // first: before anything load
 import { Agent } from "./agent.js";
 import { runApp } from "./app.js";
 import { prepare } from "./attach.js";
+import { parseGoal, startPrompt } from "./goal.js";
 import { listModels, serverContext } from "./client.js";
 import { loadConfig, type Config, type Mode } from "./config.js";
 import { systemPrompt } from "./prompt.js";
@@ -30,12 +31,14 @@ const USAGE = `jcoder — a coding agent for a local OpenAI-compatible server
   jcoder                 start
   jcoder -c              continue the last conversation in this directory
   jcoder -p "prompt"     run one request and exit
+  jcoder --goal "cond"   work until a condition is met, then exit (0 met, 2 not)
+         [--goal-check "cmd"]  met when cmd exits 0, instead of the model judging
   jcoder --setup         find or change the model server
   jcoder --version
   options: --mode ro|edit|auto  --yolo (= --mode auto)  --model ID  --url http://host:port`;
 
 function parseArgs(argv: string[]) {
-  const o: { print?: string; cont: boolean; setup: boolean; mode?: Mode; model?: string; url?: string } = { cont: false, setup: false };
+  const o: { print?: string; goal?: string; goalCheck?: string; cont: boolean; setup: boolean; mode?: Mode; model?: string; url?: string } = { cont: false, setup: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -43,6 +46,8 @@ function parseArgs(argv: string[]) {
       return argv[++i];
     };
     if (a === "-p" || a === "--print") o.print = next();
+    else if (a === "--goal") o.goal = next();
+    else if (a === "--goal-check") o.goalCheck = next();
     else if (a === "-c" || a === "--continue") o.cont = true;
     else if (a === "--mode") {
       const m = next() as Mode;
@@ -60,6 +65,8 @@ function parseArgs(argv: string[]) {
       process.exit(0);
     } else throw new Error(`unknown option ${a}\n\n${USAGE}`);
   }
+  // A goal runs like -p: no terminal needed.
+  if ((o.goal !== undefined || o.goalCheck !== undefined) && o.print === undefined) o.print = "";
   return o;
 }
 
@@ -114,10 +121,20 @@ async function main() {
     const view = new PlainView();
     const agent = new Agent(cfg, session, ctxWindow, view);
     if (resumed) agent.estimateUsed();
-    const prep = await prepare(args.print, [], agent.toolContext(new AbortController().signal));
+    let text = args.print;
+    if (args.goal !== undefined || args.goalCheck !== undefined) {
+      const parsed = parseGoal(args.goalCheck ? `${args.goal ?? ""} --check ${args.goalCheck}` : args.goal!);
+      if ("error" in parsed) throw new Error(parsed.error.replace("/goal", "--goal").replace("--check", "--goal-check"));
+      agent.setGoal(parsed);
+      text = [text, startPrompt(agent.goal!)].filter(Boolean).join("\n\n");
+    }
+    if (!text.trim()) throw new Error("-p needs a prompt");
+    const prep = await prepare(text, [], agent.toolContext(new AbortController().signal));
     for (const e of prep.errors) view.notice(e, "error");
     if (prep.notes.length) view.notice(`attached ${prep.notes.join(", ")}`);
     await agent.turn(prep.text, prep.images);
+    for (let next = await agent.goalNext(); next; next = await agent.goalNext()) await agent.turn(next, [], true);
+    if ((args.goal !== undefined || args.goalCheck !== undefined) && agent.goalOutcome !== "met") process.exit(2);
     return;
   }
 

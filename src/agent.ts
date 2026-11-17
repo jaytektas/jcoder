@@ -18,6 +18,7 @@ import { Jobs } from "./jobs.js";
 import { readOnly, schemas, TOOLS, type Approval, type Todo, type ToolContext, type ToolResult } from "./tools.js";
 import { resolveToolName, textToolCalls } from "./recover.js";
 import { duration, preview } from "./ui.js";
+import { continuePrompt, IDLE_LIMIT, parseVerdict, runCheck, verdictPrompt, type Goal } from "./goal.js";
 import type { AgentStatus, View } from "./view.js";
 
 export const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -180,6 +181,12 @@ export class Agent {
   private pool?: Promise<Pool>;
   /** Messages the user typed while a turn runs, taken between tool calls so the model sees them before its next step. */
   inbox?: () => Promise<{ text: string; images: Image[] } | null>;
+  /** /goal: worked towards turn after turn until it's met. */
+  goal?: Goal;
+  /** Whether the last turn was stopped by the user. */
+  private lastStopped = false;
+  /** How the last goal ended: met, or given up on (out of turns, stuck, or the check failed). */
+  goalOutcome?: "met" | "gave up";
 
   constructor(
     private cfg: Config,
@@ -340,12 +347,13 @@ export class Agent {
     }
   }
 
-  private addUser(text: string, images: Image[]) {
+  /** `goal`: written by jcoder to carry on towards the goal, not typed by the user. */
+  private addUser(text: string, images: Image[], goal = false) {
     const content: Content = images.length
       ? [{ type: "text", text }, ...images.map((i): Part => ({ type: "image_url", image_url: { url: i.url } }))]
       : text;
     this.messages.push({ role: "user", content });
-    this.log({ type: "user", content: storeContent(content) });
+    this.log({ type: "user", content: storeContent(content), goal: goal || undefined });
   }
 
   /**
@@ -355,6 +363,16 @@ export class Agent {
    * the prompt it has cached.
    */
   async btw(question: string, h: Handlers, signal: AbortSignal): Promise<string> {
+    const ask = `[A side question from the user while you work. Answer it briefly from what you already know: you can't use tools for it, and your task carries on afterwards.]\n\n${question}`;
+    const reply = await chat(this.cfg, this.aside(ask), this.tools, h, signal, {
+      toolChoice: "none",
+      effort: this.cfg.effort === "off" ? "off" : "low",
+    });
+    return reply.content;
+  }
+
+  /** The history with `ask` added as a user message, for a one-off question kept out of it. */
+  private aside(ask: string): Message[] {
     const messages = [...this.messages];
     // Mid-turn the last tool calls may not have results yet; every call needs one.
     const last = messages.findLastIndex((m) => m.role === "assistant");
@@ -362,7 +380,6 @@ export class Agent {
     const answered = new Set(messages.slice(last + 1).flatMap((m) => (m.role === "tool" ? [m.tool_call_id] : [])));
     for (const c of calls)
       if (!answered.has(c.id)) messages.push({ role: "tool", tool_call_id: c.id, content: "(still running)" });
-    const ask = `[A side question from the user while you work. Answer it briefly from what you already know: you can't use tools for it, and your task carries on afterwards.]\n\n${question}`;
     const end = messages[messages.length - 1];
     // Some chat templates won't take two user messages in a row.
     if (end?.role === "user")
@@ -371,20 +388,88 @@ export class Agent {
         content: typeof end.content === "string" ? `${end.content}\n\n${ask}` : [...end.content, { type: "text", text: ask }],
       };
     else messages.push({ role: "user", content: ask });
-    const reply = await chat(this.cfg, messages, this.tools, h, signal, {
-      toolChoice: "none",
-      effort: this.cfg.effort === "off" ? "off" : "low",
-    });
-    return reply.content;
+    return messages;
+  }
+
+  /** Sets the goal (turn count from 0), or clears it. */
+  setGoal(g?: { text: string; check?: string }): void {
+    this.goal = g && { text: g.text, check: g.check, turns: 0, idle: 0 };
+    this.goalOutcome = undefined;
+    this.log(g ? { type: "goal", event: "set", text: g.text, check: g.check } : { type: "goal", event: "clear" });
+  }
+
+  /**
+   * After a turn, with a goal set: checks it, and returns the message that
+   * starts the next turn, or null when there's no next turn (no goal, met,
+   * out of turns, stuck, or the user stopped it).
+   */
+  async goalNext(): Promise<string | null> {
+    const g = this.goal;
+    if (!g) return null;
+    if (this.lastStopped) {
+      this.view.notice("◎ Goal paused. It's checked again after your next message; /goal clear drops it.", "warn");
+      return null;
+    }
+    g.idle = this.calls ? 0 : g.idle + 1;
+    g.turns++;
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+    let v: { met: boolean; reason: string };
+    try {
+      this.view.busy(g.check ? `Checking the goal: ${g.check}` : "Checking the goal");
+      v = g.check
+        ? await runCheck(g.check, this.session.cwd, this.cfg.bashTimeout, signal)
+        : parseVerdict((await chat(this.cfg, this.aside(verdictPrompt(g)), this.tools, {}, signal, {
+            toolChoice: "none",
+            effort: this.cfg.effort === "off" ? "off" : "low",
+          })).content);
+    } catch (e: any) {
+      if (!signal.aborted) {
+        this.view.notice(`◎ Couldn't check the goal (${e.message}); paused. Send a message to carry on, or /goal clear.`, "error");
+        this.log({ type: "goal", event: "error", message: e.message });
+      }
+      v = { met: false, reason: "" };
+      this.goalOutcome = "gave up";
+    } finally {
+      this.abort = undefined;
+    }
+    if (signal.aborted) {
+      this.view.notice("◎ Goal check stopped; goal paused. It's checked again after your next message.", "warn");
+      return null;
+    }
+    if (!v.reason) return null; // the check failed: said above
+    this.log({ type: "goal", event: v.met ? "met" : "unmet", turn: g.turns, reason: v.reason });
+    if (v.met) {
+      this.goal = undefined;
+      this.goalOutcome = "met";
+      this.view.notice(`◎ Goal met after ${g.turns} turn${g.turns === 1 ? "" : "s"}: ${v.reason}`);
+      return null;
+    }
+    g.last = v.reason;
+    const first = v.reason.split("\n")[0].replace(/[.\s]+$/, "");
+    if (g.turns >= this.cfg.goalMaxTurns) {
+      this.goal = undefined;
+      this.goalOutcome = "gave up";
+      this.view.notice(`◎ Goal not met after ${g.turns} turns (goalMaxTurns); dropped. Last check: ${first}. /goal again to keep going.`, "warn");
+      return null;
+    }
+    if (g.idle >= IDLE_LIMIT) {
+      this.goal = undefined;
+      this.goalOutcome = "gave up";
+      this.view.notice(`◎ Goal dropped: ${g.idle} turns in a row with no tool calls, so it looks stuck. Last check: ${first}`, "warn");
+      return null;
+    }
+    this.view.notice(`◎ Goal not met (turn ${g.turns}/${this.cfg.goalMaxTurns}): ${first}`);
+    return continuePrompt(g, v.reason);
   }
 
   /** Runs one user request to the end: model, tools, model, ... Resolves with the final reply. */
-  async turn(text: string, images: Image[] = []): Promise<string> {
+  async turn(text: string, images: Image[] = [], goal = false): Promise<string> {
     let final = "";
     // Older turns keep their thinking: stripping it changes the prompt right after the system prompt,
     // so the server re-reads the whole conversation (minutes on a long one). Compacting drops it.
     this.turnTokens = 0;
-    this.addUser(text, images);
+    this.addUser(text, images, goal);
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const started = Date.now();
@@ -453,6 +538,7 @@ export class Agent {
       this.log({ type: "error", message: e.message });
     } finally {
       this.abort = undefined;
+      this.lastStopped = signal.aborted;
       if (!this.sub) saveSession(this.session);
     }
     this.view.turnDone({
@@ -701,6 +787,8 @@ export class Agent {
     }
     if (this.todos.length)
       text += `\n\nYour to-do list:\n${this.todos.map((t) => `[${t.status === "done" ? "x" : t.status === "in_progress" ? ">" : " "}] ${t.text}`).join("\n")}`;
+    if (this.goal)
+      text += `\n\nThe goal you're working towards (/goal): ${this.goal.text}${this.goal.check ? `\nIt's met when \`${this.goal.check}\` exits 0.` : ""}`;
     const running = this.jobs.list().filter((j) => !j.exit);
     if (running.length) text += `\n\nBackground jobs still running:\n${running.map((j) => `${j.id}: ${j.command}`).join("\n")}`;
     const content: Content = images.length ? [{ type: "text", text }, ...images] : text;

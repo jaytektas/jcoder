@@ -17,6 +17,7 @@ import { Agent, k, toolLine } from "./agent.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf, type ToolCall } from "./client.js";
 import { COMMANDS } from "./complete.js";
+import { parseGoal, startPrompt } from "./goal.js";
 import { DEFAULTS, EFFORT_BUDGET, EFFORTS, LIVE_SETTINGS, parseSetting, samplingFor, saveConfig, saveSettings, settingName, type Config, type Effort, type Mode } from "./config.js";
 import { Editor } from "./editor.js";
 import { clipboardImage, type Image } from "./images.js";
@@ -701,7 +702,11 @@ function App(props: Props) {
     const calls = new Map<string, ToolCall>();
     const reply = (t: string) => t.trim() && push(blocks.reply(renderMarkdown(t.trim()), true));
     for (const e of events) {
-      if (e.type === "user") {
+      if (e.type === "user" && e.goal) notice(`◎ ${textOf(e.content).split("\n")[0]}`);
+      else if (e.type === "goal") {
+        if (e.event === "set") notice(`◎ Goal set: ${e.text}${e.check ? ` (checked by \`${e.check}\`)` : ""}`);
+        else if (e.event === "met") notice(`◎ Goal met: ${e.reason}`);
+      } else if (e.type === "user") {
         // Attached files went to the model, not on the screen.
         const files: string[] = [];
         const t = textOf(e.content).replace(/\n\n<file path="([^"]*)">[\s\S]*?\n<\/file>/g, (_: string, f: string) => (files.push(f), ""));
@@ -795,8 +800,18 @@ function App(props: Props) {
     for (const e of prep.errors) notice(e, "error");
     if (prep.notes.length) push(blocks.result(`attached ${prep.notes.join(", ")}`, false));
     setBusy({ label: "Thinking", detail: "", since: Date.now() });
-    await agentRef.current.turn(prep.text, prep.images);
+    const a = agentRef.current;
+    await a.turn(prep.text, prep.images);
+    // With a goal set, keep going until it's met. Messages the user typed meanwhile go first;
+    // the goal is checked again after them.
+    while (a === agentRef.current && a.goal && !queueRef.current.length) {
+      const next = await a.goalNext();
+      if (!next || queueRef.current.length || a !== agentRef.current) break;
+      setBusy({ label: "Thinking", detail: "", since: Date.now() });
+      await a.turn(next, [], true);
+    }
     setBusy(null);
+    rerender();
   };
 
   // Between tool calls the running turn takes everything queued, as one message.
@@ -894,6 +909,39 @@ function App(props: Props) {
         } catch (e: any) {
           if (!stop.signal.aborted) update(() => ({ status: `failed: ${e.message}` }));
         }
+        break;
+      }
+      case "goal": {
+        const g = a.goal;
+        if (!arg) {
+          if (!g) notice("No goal set. /goal <condition> [--check <command>] works until it's met.");
+          else
+            notice(
+              `◎ Goal: ${g.text}${g.check ? ` · checked by \`${g.check}\`` : ""} · turn ${g.turns}/${cfg.goalMaxTurns}` +
+                (g.last ? `\n  last check: ${g.last.split("\n")[0]}` : ""),
+            );
+          break;
+        }
+        if (/^(clear|off|stop|cancel|none)$/i.test(arg)) {
+          if (g) a.setGoal();
+          notice(g ? "Goal cleared." : "No goal to clear.");
+          rerender();
+          break;
+        }
+        const parsed = parseGoal(arg);
+        if ("error" in parsed) {
+          notice(parsed.error, "error");
+          break;
+        }
+        a.setGoal(parsed);
+        rerender();
+        if (a.running) {
+          notice(`◎ Goal set: ${parsed.text}. It's checked when this turn ends.`);
+          break;
+        }
+        notice(`◎ Goal set${g ? " (replacing the last one)" : ""}. jcoder keeps going until it's met, up to ${cfg.goalMaxTurns} turns (goalMaxTurns); esc pauses it.`);
+        if (busy || pick) setQueue((q) => [...q, startPrompt(a.goal!)]);
+        else await run(startPrompt(a.goal!));
         break;
       }
       case "exit":
@@ -1091,7 +1139,7 @@ function App(props: Props) {
     setPinTop(null); // back to the bottom, where the answer will come
     const line = text.trim();
     if (line.startsWith("/") && !line.includes("\n")) {
-      if (agentRef.current.running && !/^\/(btw|thoughts|mode|ctx|log|help)\b/.test(line)) {
+      if (agentRef.current.running && !/^\/(btw|thoughts|mode|ctx|log|help|goal)\b/.test(line)) {
         notice("Wait for the model to finish, or press esc.", "warn");
         return false;
       }
@@ -1486,6 +1534,7 @@ function App(props: Props) {
                 <Text color={modeColor}>{modeText}</Text>
                 <Text color="gray"> (shift+tab)</Text>
                 {runningJobs > 0 && <Text color="blue"> · {runningJobs} background job{runningJobs > 1 ? "s" : ""}</Text>}
+                {a.goal && <Text color="magenta"> · ◎ goal {a.goal.turns}/{cfg.goalMaxTurns} (/goal)</Text>}
               </>
             )}
           </Text>

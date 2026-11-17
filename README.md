@@ -119,6 +119,7 @@ model gets your reason.
 | `/effort [off\|low\|medium\|high\|max]` | how hard the model thinks |
 | `/mode [ro\|edit\|auto]`, `/yolo` | permissions |
 | `/thoughts` | show or hide thinking |
+| `/goal <condition> [--check <cmd>]` | keep working until the condition is met, see below |
 | `/compact` | summarise the conversation to free context (automatic at 85%) |
 | `/clear` | start a new conversation |
 | `/resume` | pick an earlier conversation in this folder |
@@ -131,7 +132,21 @@ model gets your reason.
 | `/update` | check for a new release now |
 | `/help` | everything above |
 
+**Goals.** `/goal all tests pass and tsc is clean` sets a condition and
+starts working on it. When a turn ends, the model is asked, without tools,
+whether the conversation shows the goal met (output that shows it, not
+claims). If it doesn't, jcoder starts the next turn itself, telling the model
+what's still missing. Add `--check <command>` to let a command decide
+instead: the goal is met when it exits 0, and its output goes back to the model
+when it doesn't (`/goal --check npm test`). It stops when the goal is met,
+after `goalMaxTurns` turns (20), or after two turns in a row with no tool
+calls (stuck). esc pauses it until your next message. `/goal` shows the goal
+and `/goal clear` drops it. Messages you type in the meantime go first.
+
 From a script: `jcoder -p "fix the failing test"` runs one request and exits.
+`jcoder --goal "the build passes" --goal-check "npm run build" --yolo` works
+until the goal is met. It exits 0 if it was met and 2 if not, and `-p` can add
+instructions.
 `jcoder -c` carries on the last conversation in this folder.
 
 ## Tools
@@ -286,6 +301,7 @@ objects. Effort, mode, thinking, `maxAgents`, `agentMaxTools`, timeouts, `compac
 | `maxAgents` | -1 | sub-agents at once: `0` turns agents off, a number caps them (never above the servers' slots), `-1` follows the servers' slots |
 | `slots` | 0 | requests the main server runs at once: `0` is what it reports (llama.cpp), or 4 when it doesn't say |
 | `agentMaxTools` | 45 | tool calls a sub-agent gets; it's told to wrap up at two thirds |
+| `goalMaxTurns` | 20 | turns `/goal` takes before giving up on a goal that isn't met |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
 | `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |
