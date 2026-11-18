@@ -35,6 +35,7 @@ export const COMMANDS: Command[] = [
   { name: "log", desc: "where this conversation's full log is" },
   { name: "update", desc: "check for a new jcoder release and install it" },
   { name: "advisors", desc: "the remote models ask_model can use, each tested" },
+  { name: "browser", args: "[on|off]", desc: "jcoder in Chrome: let the model drive your browser" },
   { name: "sampling", desc: "the sampling settings in use for this model" },
   { name: "setting", args: "[name [value]]", desc: "show the settings, or change one" },
   { name: "exit", desc: "quit (also ctrl+d)" },

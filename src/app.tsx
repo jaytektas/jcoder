@@ -14,6 +14,7 @@ import { Box, Static, Text, render, useApp, useInput, useWindowSize } from "ink"
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
 import { Agent, k, toolLine } from "./agent.js";
+import { bridge, EXTENSION_DIR } from "./browser.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf, type ToolCall } from "./client.js";
 import { COMMANDS } from "./complete.js";
@@ -106,7 +107,7 @@ function BlockView({ b }: { b: Block }) {
 }
 
 const E = "\x1b[";
-const ansi = { bold: (t: string) => `${E}1m${t}${E}22m`, cyan: (t: string) => `${E}36m${t}${E}39m`, gray: (t: string) => `${E}90m${t}${E}39m`, magenta: (t: string) => `${E}35m${t}${E}39m` };
+const ansi = { bold: (t: string) => `${E}1m${t}${E}22m`, cyan: (t: string) => `${E}36m${t}${E}39m`, gray: (t: string) => `${E}90m${t}${E}39m`, magenta: (t: string) => `${E}35m${t}${E}39m`, green: (t: string) => `${E}32m${t}${E}39m`, yellow: (t: string) => `${E}33m${t}${E}39m`, red: (t: string) => `${E}31m${t}${E}39m` };
 
 const blocks = {
   /** A piece of a reply; `text` is already rendered markdown. */
@@ -1073,6 +1074,60 @@ function App(props: Props) {
         else if (key === "maxAgents" && value === 0) notice("maxAgents 0: sub-agents off.");
         else if (key === "model") notice(`model ${show(key, value)} saved for the next start; /model switches now.`);
         else if (key !== "effort") notice(`${key} ${show(key, value)}${LIVE_SETTINGS.has(key) ? "" : " saved; takes effect at the next start"}.`);
+        break;
+      }
+      case "browser": {
+        if (arg && arg !== "on" && arg !== "off") {
+          notice("Usage: /browser [on|off]", "warn");
+          break;
+        }
+        if (arg === "on" || arg === "off") {
+          const on = arg === "on";
+          if (on && !bridge.running) {
+            try {
+              await bridge.start(cfg.browserListen, cfg.browserToken, `jcoder · ${path.basename(cwd)}`);
+            } catch (e: any) {
+              notice(`The browser bridge can't start: ${e.message}`, "error");
+              break;
+            }
+          }
+          if (!on) bridge.stop();
+          if (cfg.browser !== on) {
+            cfg.browser = on;
+            saveSettings({ browser: on });
+            a.toolsChanged();
+            rerender();
+          }
+          if (!on) {
+            notice("Browser off: the model no longer has the browser tool.");
+            break;
+          }
+        }
+        const ext = tilde(EXTENSION_DIR);
+        const browsers = bridge.connected;
+        push({
+          prefix: "  ",
+          marginTop: 1,
+          text: [
+            cfg.browser
+              ? bridge.running
+                ? `${ansi.green("●")} jcoder in Chrome is on · listening on ${bridge.address}`
+                : `${ansi.red("●")} jcoder in Chrome is on, but the bridge isn't running${bridge.error ? `: ${bridge.error}` : ""}`
+              : `${ansi.gray("○")} jcoder in Chrome is off · /browser on gives the model the browser tool`,
+            ...(cfg.browser && bridge.running
+              ? browsers.length
+                ? browsers.map((b) => `  ${ansi.green("✓")} ${b.name} · extension ${b.version}${b === browsers[0] ? " · in use" : ""}`)
+                : [`  ${ansi.yellow("…")} no browser connected yet`]
+              : []),
+            "",
+            ansi.gray("Set up the extension once:"),
+            ansi.gray(`  1. In Chrome open chrome://extensions and turn on Developer mode (top right).`),
+            ansi.gray(`  2. Load unpacked → ${ext}`),
+            ansi.gray(`  3. Pin jcoder; its popup shows the jcoder sessions it's connected to.`),
+            ansi.gray(`The model works in its own tab group; drag a tab into the group to hand it over.`),
+            ansi.gray(`jcoder on another machine: ssh -L ${bridge.address.split(":").pop() || "47823"}:127.0.0.1:${bridge.address.split(":").pop() || "47823"} that-host, or set browserListen and browserToken.`),
+          ].join("\n"),
+        });
         break;
       }
       case "sampling": {

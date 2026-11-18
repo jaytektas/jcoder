@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; --fg: #1f2328; --muted: #656d76; --bg: #fff; --line: #d0d7de; --accent: #2563eb; --ok: #1a7f37; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --muted: #8d96a0; --bg: #161b22; --line: #30363d; --accent: #4c8dff; --ok: #3fb950; } }
+  body { margin: 0; width: 320px; font: 13px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  header img { width: 20px; height: 20px; }
+  header b { font-size: 14px; }
+  section { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  h2 { margin: 0 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .session { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+  .url { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .empty { color: var(--muted); }
+  label { display: block; margin: 6px 0 2px; color: var(--muted); font-size: 12px; }
+  input { box-sizing: border-box; width: 100%; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: 12px ui-monospace, monospace; }
+  button { margin-top: 8px; padding: 5px 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+  code { font: 11px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<header><img src="icons/32.png" alt=""><b>jcoder in Chrome</b></header>
+<section>
+  <h2>Connected</h2>
+  <div id="sessions"><span class="empty">Looking for jcoder…</span></div>
+  <p>Each jcoder works in its own tab group. Drag a tab into a group to hand it over.</p>
+</section>
+<section>
+  <h2>Settings</h2>
+  <form id="form">
+    <label for="addresses">Where jcoder listens (host:port or a port range, comma-separated)</label>
+    <input id="addresses" spellcheck="false">
+    <label for="token">Token (jcoder's browserToken, if set)</label>
+    <input id="token" type="password" spellcheck="false">
+    <button type="submit">Save</button> <span id="saved" class="empty"></span>
+  </form>
+  <p>In jcoder, <code>/browser on</code> turns it on; <code>/browser</code> shows the status.</p>
+</section>
+<script src="popup.js" type="module"></script>
+</body>
+</html>

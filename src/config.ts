@@ -41,6 +41,12 @@ export interface Config {
   maxToolChars: number;
   /** SearXNG server for the web_search tool; empty turns it off. */
   searchUrl: string;
+  /** jcoder in Chrome: offer the browser tool, driving Chrome through the jcoder extension. */
+  browser: boolean;
+  /** Where the browser bridge listens for the extension, host:port; the next free port of ten is taken when it's busy. */
+  browserListen: string;
+  /** A secret the extension must send; needed when browserListen isn't on this machine only. */
+  browserToken: string;
   /** Remote models for ask_model: {preset, apiKey} or {name, baseUrl, apiKey, model}. See advisors.ts. */
   advisors: AdvisorSetting[];
   /** Seconds to wait for an advisor's answer before trying the next (each can set its own "timeout"). */
@@ -129,6 +135,9 @@ export const DEFAULTS: Config = {
   agentServers: [],
   agentsOnMain: true,
   searchUrl: "",
+  browser: false,
+  browserListen: "127.0.0.1:47823",
+  browserToken: "",
   checkUpdates: true,
   fullscreen: true,
   advisors: [],

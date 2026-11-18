@@ -17,6 +17,7 @@ import { HOME, type Mode } from "./config.js";
 import { isImagePath, kb, loadImage } from "./images.js";
 import type { Jobs } from "./jobs.js";
 import { webFetch, webSearch } from "./web.js";
+import { ACTIONS, browserAction, browserSummary } from "./browser.js";
 import { c } from "./ui.js";
 import { highlightLine, langOf } from "./highlight.js";
 
@@ -933,8 +934,45 @@ const fetchPage: Tool = {
   },
 };
 
+const browser: Tool = {
+  schema: def(
+    "browser",
+    "Drive the user's Chrome (signed in as them) in jcoder's own tab group. Look with read_page (elements with refs like e12) or screenshot, " +
+      "then act by ref, or by x,y in the last screenshot. Every result ends with the tab id, title and URL. " +
+      "Actions: tabs; new_tab [url]; close_tab; navigate url; back; forward; reload; read_page [ref] [all: text too]; find text (elements matching it); " +
+      "text (the page's readable text); screenshot; zoom x,y,x2,y2 (a close-up); click/double_click/right_click/hover ref|x,y; " +
+      "type text [ref: click it first]; key text (\"Enter\", \"ctrl+a\", \"Tab Tab\"); scroll [ref|x,y] [direction] [amount]; drag x,y,x2,y2; " +
+      "set ref text (a select, checkbox or input's value); upload ref files; dialog text (accept, dismiss, or a prompt's answer); " +
+      "js text (run JavaScript in the page; the last expression's value comes back, await works); console [text: regex] [all]; " +
+      "network [text: regex] [ref: request id for its response body]; wait [seconds] [text: until it appears]; resize x,y (window size).",
+    {
+      action: { type: "string", enum: ACTIONS },
+      tab: int("Tab id (default: the one used last)"),
+      url: str("For navigate and new_tab"),
+      ref: str("Element ref from read_page or find"),
+      x: int("Pixels in the screenshot"),
+      y: int("Pixels in the screenshot"),
+      x2: int("Drag or zoom end"),
+      y2: int("Drag or zoom end"),
+      text: str("Text, keys, query, value, code or pattern, as the action needs"),
+      direction: { type: "string", enum: ["down", "up", "left", "right"] },
+      amount: int("Scroll steps (default 5)"),
+      seconds: int("For wait (max 60)"),
+      all: { type: "boolean", description: "read_page: include text; console: entries already shown too" },
+      files: { type: "array", items: { type: "string" }, description: "upload: file paths" },
+    },
+    ["action"],
+  ),
+  writes: false,
+  summary: browserSummary,
+  async run(a, ctx) {
+    const r = await browserAction(a, ctx);
+    return typeof r.content === "string" ? { ...r, content: cap(r.content, ctx.maxChars) } : r;
+  },
+};
+
 export const TOOLS: Record<string, Tool> = Object.fromEntries(
-  [readFile, writeFile, editFile, bash, bashOutput, bashStop, grep, glob, search, fetchPage, todo, askUser, askModel, agentTool].map((t) => [
+  [readFile, writeFile, editFile, bash, bashOutput, bashStop, grep, glob, search, fetchPage, browser, todo, askUser, askModel, agentTool].map((t) => [
     t.schema.function.name,
     t,
   ]),
@@ -946,9 +984,10 @@ export const TOOLS: Record<string, Tool> = Object.fromEntries(
  * writing tools when they're called instead.
  */
 /** Tools a sub-agent doesn't get: it can't start agents, ask the user, or own the to-do list. */
-const MAIN_ONLY = new Set(["agent", "ask_user", "todo"]);
+/** The browser too: agents would fight over the same tabs. */
+const MAIN_ONLY = new Set(["agent", "ask_user", "todo", "browser"]);
 
-export function schemas(opts: { advisors: Advisor[]; searchUrl: string; maxAgents: number }, sub = false): ToolSchema[] {
+export function schemas(opts: { advisors: Advisor[]; searchUrl: string; maxAgents: number; browser?: boolean }, sub = false): ToolSchema[] {
   // Tools that need setting up are only offered once they are.
   const names = opts.advisors.map((a) => `${a.name} (${a.model})`).join(", ");
   return Object.values(TOOLS)
@@ -956,6 +995,7 @@ export function schemas(opts: { advisors: Advisor[]; searchUrl: string; maxAgent
     .filter((t) => t.schema.function.name !== "agent" || opts.maxAgents !== 0)
     .filter((t) => t.schema.function.name !== "ask_model" || opts.advisors.length)
     .filter((t) => t.schema.function.name !== "web_search" || opts.searchUrl)
+    .filter((t) => t.schema.function.name !== "browser" || opts.browser)
     .map((t) =>
       t.schema.function.name === "ask_model"
         ? { ...t.schema, function: { ...t.schema.function, description: `Advisors: ${names}. ${t.schema.function.description}` } }

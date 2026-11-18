@@ -11,6 +11,7 @@
 
 import { restoreNodeEnv } from "./production.js"; // first: before anything loads React
 import { Agent } from "./agent.js";
+import { bridge } from "./browser.js";
 import { runApp } from "./app.js";
 import { prepare } from "./attach.js";
 import { parseGoal, startPrompt } from "./goal.js";
@@ -20,6 +21,7 @@ import { systemPrompt } from "./prompt.js";
 import { setup } from "./setup.js";
 import { listSessions, newSession, openSession } from "./session.js";
 import { VERSION } from "./update.js";
+import path from "node:path";
 import { PlainView } from "./view.js";
 
 restoreNodeEnv();
@@ -116,6 +118,9 @@ async function main() {
       resumed = true;
     } else console.error("no earlier conversation here; starting a new one");
   }
+
+  if (cfg.browser)
+    await bridge.start(cfg.browserListen, cfg.browserToken, `jcoder · ${path.basename(cwd)}`).catch((e) => console.error(`jcoder: browser bridge: ${e.message}`));
 
   if (args.print !== undefined) {
     const view = new PlainView();

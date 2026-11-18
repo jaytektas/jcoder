@@ -158,10 +158,46 @@ instructions.
 | `bash_output` `bash_stop` | read a background job's new output, or stop it |
 | `grep` `glob` | search contents, find files |
 | `web_search` `web_fetch` | search the web through [SearXNG](https://github.com/searxng/searxng) (once `searchUrl` is set), read a page |
+| `browser` | drive your Chrome through the jcoder extension (once `/browser on`), see below |
 | `todo` | the model's checklist for a bigger job, shown above the input |
 | `ask_user` | the model asks you a question, with choices, mid-task |
 | `ask_model` | a second opinion from a stronger remote model (once an advisor is set up) |
 | `agent` | hand a self-contained job to a sub-agent with a fresh context |
+
+**jcoder in Chrome.** With the jcoder extension, the model can use your
+real Chrome, signed in as you: open pages, read them, click, type, fill
+forms, upload files, take screenshots, run JavaScript, and read the
+console and network requests. It's how it tests the web app it just
+changed, or does something on a site that has no API.
+
+1. `/browser on` in jcoder. It listens on `127.0.0.1:47823`, or the next
+   free port of ten when several jcoders are running.
+2. In Chrome, open `chrome://extensions`, turn on Developer mode and choose
+   **Load unpacked**. Pick the `extension` folder; `/browser` shows where
+   it is (`~/.local/share/jcoder/lib/node_modules/jcoder/extension` for
+   the installer).
+3. Pin the extension. Its popup lists the jcoder sessions it's connected
+   to.
+
+The model works only in jcoder's own tab group, one group per jcoder; drag
+a tab into the group to hand it over. It reads a page as a list of elements
+with refs (`button "Sign in" [e12]`) and acts on them by ref, so it works
+with models that can't see images; models that can also get screenshots
+and close-ups, and can click by position. Dialogs don't stall it: alerts
+are accepted and reported, and confirms and prompts wait for its answer.
+In `edit` mode it asks once per site before it clicks, types or runs
+anything on a page; reading and navigating don't ask. `ro` mode only
+looks. Chrome shows "jcoder started debugging this browser" while it
+works. Cancelling that bar detaches it until its next action.
+
+The tool adds about 700 tokens to the prompt, so it's off until you turn it
+on. `/browser off` takes it away again. Either change restarts the
+server's prompt cache once.
+
+jcoder on another machine: forward the port, `ssh -L 47823:127.0.0.1:47823
+that-host`, and the extension finds it. Or set `browserListen` to
+`"0.0.0.0:47823"` with a `browserToken`, and put that host and token in
+the extension's popup. Only extensions can connect, never web pages.
 
 **Agents.** For a big search or an independent piece of work, the model can
 start a sub-agent. It has the same tools (it can't start agents itself, ask
@@ -304,6 +340,9 @@ objects. Effort, mode, thinking, `maxAgents`, `agentMaxTools`, timeouts, `compac
 | `goalMaxTurns` | 20 | turns `/goal` takes before giving up on a goal that isn't met |
 | `bashTimeout` | 120 | seconds a command may run unless the model asks for longer (max 600) |
 | `searchUrl` | | a SearXNG server, e.g. `http://127.0.0.1:8888`; `web_search` is offered once it's set |
+| `browser` | false | offer the `browser` tool (also `/browser on`), see [jcoder in Chrome](#tools) |
+| `browserListen` | `127.0.0.1:47823` | where jcoder listens for the extension; the next free port of ten is used when it's taken |
+| `browserToken` | | a secret the extension must send; needed when `browserListen` is open to the network |
 | `advisors` | `[]` | remote models for `ask_model`, see [Advisors](#tools) |
 | `advisorTimeout` | 90 | seconds to wait for an advisor before trying the next |
 | `dropAdvisors` | `session` | an advisor that ignores us: `never`, `session`, `day`, `week`, `month`, `year`, `permanent` |

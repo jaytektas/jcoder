@@ -2,6 +2,21 @@
 
 ## 0.6.11
 
+- **jcoder in Chrome: the model can drive your browser.** A Chrome
+  extension (`extension/`, load it unpacked) connects to jcoder and gives
+  the model a `browser` tool: open pages, read them as a tree of elements
+  with refs, find things, click, type, press keys, scroll, drag, fill
+  forms, upload files, answer dialogs, take screenshots and close-ups, run
+  JavaScript, and read the console and network (response bodies too). It
+  works in your Chrome with your sign-ins, in jcoder's own tab group, and
+  each jcoder gets its own group. Refs make it work for models without
+  vision; screenshots are there for models with it. In edit mode it asks
+  once per site before acting on a page; read-only mode only looks.
+  `/browser on` turns it on (it's off by default: the tool adds about 700
+  tokens to the prompt), `/browser` shows the status and how to set up the
+  extension. jcoder on another machine: tunnel the port over ssh, or set
+  `browserListen` and `browserToken`.
+
 - **`/goal`: keep working until it's done.** `/goal <condition>` sets a
   goal and starts on it. After each turn the model is asked, without
   tools and outside the conversation, whether the evidence so far (tool

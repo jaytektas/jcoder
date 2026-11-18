@@ -173,8 +173,8 @@ export class Agent {
   private calls = 0;
   readonly jobs = new Jobs();
   todos: Todo[] = [];
-  /** Fixed for the session: the tool list is part of the prompt the server caches. */
-  readonly tools: ToolSchema[];
+  /** Fixed for the session, except by /browser: the tool list is part of the prompt the server caches. */
+  tools: ToolSchema[];
   readonly advisors: Advisor[];
   private agents = 0;
   /** Where sub-agents run; worked out on first use. */
@@ -197,7 +197,17 @@ export class Agent {
     private sub?: { description: string; parent: Session; maxTools: number },
   ) {
     this.advisors = resolveAdvisors(cfg.advisors, cfg.advisorTimeout);
-    this.tools = schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl, maxAgents: cfg.maxAgents }, !!sub);
+    this.tools = this.toolList();
+  }
+
+  private toolList(): ToolSchema[] {
+    const cfg = this.cfg;
+    return schemas({ advisors: this.advisors, searchUrl: cfg.searchUrl, maxAgents: cfg.maxAgents, browser: cfg.browser }, !!this.sub);
+  }
+
+  /** /browser on or off: the tool list changes, so the server's cache of the prompt starts again. */
+  toolsChanged(): void {
+    this.tools = this.toolList();
   }
 
   /** maxAgents changed: agents waiting for a slot go by the new cap. */
