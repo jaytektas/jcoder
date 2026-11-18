@@ -24,7 +24,8 @@ if [ "$bump" = "$current" ]; then
   git tag -a "v$current" -m "jcoder $current"
   version=$current
 else
-  version=$(npm version "$bump" -m "jcoder %s")   # commits package.json and tags vX.Y.Z
+  # The last line: npm prints the version scripts' output before it.
+  version=$(npm version "$bump" -m "jcoder %s" | tail -n 1)   # commits package.json and tags vX.Y.Z
   version=${version#v}
 fi
 tgz=$(npm pack --silent)                         # runs the build again via prepack
