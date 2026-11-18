@@ -175,7 +175,9 @@ changed, or does something on a site that has no API.
 2. In Chrome, open `chrome://extensions`, turn on Developer mode and choose
    **Load unpacked**. Pick the `extension` folder; `/browser` shows where
    it is (`~/.local/share/jcoder/lib/node_modules/jcoder/extension` for
-   the installer).
+   the installer). Or download `jcoder-chrome.zip` from the
+   [latest release](https://github.com/jaytektas/jcoder/releases/latest),
+   unzip it and pick that folder.
 3. Pin the extension. Its popup lists the jcoder sessions it's connected
    to.
 

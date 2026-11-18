@@ -28,13 +28,25 @@ else
   version=${version#v}
 fi
 tgz=$(npm pack --silent)                         # runs the build again via prepack
+# The Chrome extension as a zip: what the Web Store takes, and what anyone
+# can unzip and load unpacked.
+ext="jcoder-chrome-$version.zip"
+rm -f "$ext"
+stage=$(mktemp -d)
+cp -r extension/. "$stage"
+rm -f "$stage/icons/icon.svg"
+# A "key" in the manifest pins the extension's ID for unpacked copies; the Web Store refuses uploads with one.
+node -e 'const fs=require("fs"),f=process.argv[1],m=JSON.parse(fs.readFileSync(f,"utf8"));delete m.key;fs.writeFileSync(f,JSON.stringify(m,null,2)+"\n")' "$stage/manifest.json"
+(cd "$stage" && zip -qr - .) > "$ext"
+rm -rf "$stage"
+unzip -p "$ext" manifest.json | grep -q "\"version\": \"$version\"" || { echo "extension/manifest.json isn't at $version" >&2; exit 1; }
 
 # Never publish a key: refuse if the package or the commits being pushed
 # hold anything shaped like one (Google, Anthropic, OpenAI, Groq, GitHub,
 # OpenRouter, NVIDIA, Hugging Face, AWS).
 KEYS='AIza[0-9A-Za-z_-]{30,}|AQ\.[0-9A-Za-z_-]{30,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-(proj-)?[0-9A-Za-z_-]{30,}|gsk_[0-9A-Za-z]{30,}|gh[pousr]_[0-9A-Za-z]{30,}|sk-or-[0-9A-Za-z_-]{30,}|nvapi-[0-9A-Za-z_-]{30,}|hf_[0-9A-Za-z]{30,}|AKIA[0-9A-Z]{16}'
-if tar xzOf "$tgz" | grep -Eq "$KEYS" || git log -p "@{u}..HEAD" 2>/dev/null | grep -Eq "$KEYS"; then
-  rm -f "$tgz"
+if tar xzOf "$tgz" | grep -Eq "$KEYS" || unzip -p "$ext" | grep -Eq "$KEYS" || git log -p "@{u}..HEAD" 2>/dev/null | grep -Eq "$KEYS"; then
+  rm -f "$tgz" "$ext"
   git tag -d "v$version" >/dev/null
   echo "refusing to release: something that looks like an API key is in the package or the new commits" >&2
   exit 1
@@ -43,9 +55,10 @@ git push --follow-tags
 # The same package as jcoder.tgz too, so releases/latest/download/jcoder.tgz
 # is a stable install URL.
 cp "$tgz" jcoder.tgz
+cp "$ext" jcoder-chrome.zip
 # Notes: this version's section of CHANGELOG.md.
 notes=$(awk -v v="## $version" '$0 == v {on=1; next} /^## / {on=0} on' CHANGELOG.md)
 [ -n "$notes" ] || notes="jcoder $version"
-gh release create "v$version" "$tgz" jcoder.tgz --title "jcoder $version" --notes "$notes"
-rm -f "$tgz" jcoder.tgz
+gh release create "v$version" "$tgz" jcoder.tgz "$ext" jcoder-chrome.zip --title "jcoder $version" --notes "$notes"
+rm -f "$tgz" jcoder.tgz "$ext" jcoder-chrome.zip
 echo "released jcoder $version"

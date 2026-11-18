@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body>
+<div class="title"><h1>Your local coding agent, in your browser</h1><p>jcoder fills in forms, reads the console and network, and finds the bug.</p></div>
+<div class="term" style="left:40px;top:150px;width:610px;height:494px">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp; jcoder · ~/greenhouse</div>
+<pre><span class="b">❯</span> add a plant called Fern watered every 3 days, and check it saved
+
+<span class="g">●</span> <span class="b">browser</span> type [e1] "Fern"
+<span class="m">  └ Typed "Fern" into textbox "Plant name".</span>
+<span class="g">●</span> <span class="b">browser</span> set [e4] "Every 3 days"
+<span class="m">  └ combobox "Water every" set to "Every 3 days".</span>
+<span class="g">●</span> <span class="b">browser</span> click [e2]
+<span class="m">  └ Clicked button "Add plant".</span>
+<span class="y">    (2 new console errors: action console shows them)</span>
+<span class="g">●</span> <span class="b">browser</span> network "api/plants"
+<span class="m">  └ 1279281.6 POST </span><span class="r">500</span><span class="m"> fetch /api/plants 150B</span>
+<span class="g">●</span> <span class="b">browser</span> console "Saving failed|500"
+<span class="m">  └ </span><span class="r">[error] Saving failed: HTTP 500</span><span class="m">  (page:25)</span>
+
+<span class="b">The plant was added to the list, but it did not save.</span>
+- The row Fern / every 3 days appeared, so the UI looks
+  like it worked.
+- POST /api/plants → 500; the request body was right
+  ({"name":"Fern","every":3}), the response was <span class="c">db locked</span>.
+- Reloading drops Fern: nothing was stored.
+
+The UI also appends the row before the save and only logs
+the failure, which is why it falsely looks saved.</pre></div>
+<div class="browser" style="left:680px;top:194px;width:560px">
+<div class="tabs"><span class="group">jcoder · greenhouse</span><span class="tab">🌿 Greenhouse · plant schedule</span></div>
+<div class="url"><span>127.0.0.1:47999</span><img class="ext" src="icon.svg"></div>
+<img class="page" src="greenhouse.jpg" width="560">
+</div>
+</body></html>

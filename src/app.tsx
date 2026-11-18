@@ -14,7 +14,7 @@ import { Box, Static, Text, render, useApp, useInput, useWindowSize } from "ink"
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import wrapAnsi from "wrap-ansi";
 import { Agent, k, toolLine } from "./agent.js";
-import { bridge, EXTENSION_DIR } from "./browser.js";
+import { bridge, EXTENSION_DIR, STORE_URL } from "./browser.js";
 import { prepare } from "./attach.js";
 import { listModels, serverContext, textOf, type ToolCall } from "./client.js";
 import { COMMANDS } from "./complete.js";
@@ -1116,14 +1116,22 @@ function App(props: Props) {
               : `${ansi.gray("○")} jcoder in Chrome is off · /browser on gives the model the browser tool`,
             ...(cfg.browser && bridge.running
               ? browsers.length
-                ? browsers.map((b) => `  ${ansi.green("✓")} ${b.name} · extension ${b.version}${b === browsers[0] ? " · in use" : ""}`)
+                ? browsers.map(
+                    (b) =>
+                      `  ${ansi.green("✓")} ${b.name} · extension ${b.version}${b === browsers[0] ? " · in use" : ""}` +
+                      (b.version !== VERSION ? ansi.yellow(` · jcoder is ${VERSION}: update the extension (reload it in chrome://extensions)`) : ""),
+                  )
                 : [`  ${ansi.yellow("…")} no browser connected yet`]
               : []),
             "",
-            ansi.gray("Set up the extension once:"),
-            ansi.gray(`  1. In Chrome open chrome://extensions and turn on Developer mode (top right).`),
-            ansi.gray(`  2. Load unpacked → ${ext}`),
-            ansi.gray(`  3. Pin jcoder; its popup shows the jcoder sessions it's connected to.`),
+            ...(STORE_URL
+              ? [ansi.gray(`Set up the extension once: install jcoder in Chrome from ${STORE_URL}`), ansi.gray(`  (or load it unpacked from ${ext} in chrome://extensions, Developer mode)`)]
+              : [
+                  ansi.gray("Set up the extension once:"),
+                  ansi.gray(`  1. In Chrome open chrome://extensions and turn on Developer mode (top right).`),
+                  ansi.gray(`  2. Load unpacked → ${ext}`),
+                  ansi.gray(`  3. Pin jcoder; its popup shows the jcoder sessions it's connected to.`),
+                ]),
             ansi.gray(`The model works in its own tab group; drag a tab into the group to hand it over.`),
             ansi.gray(`jcoder on another machine: ssh -L ${bridge.address.split(":").pop() || "47823"}:127.0.0.1:${bridge.address.split(":").pop() || "47823"} that-host, or set browserListen and browserToken.`),
           ].join("\n"),

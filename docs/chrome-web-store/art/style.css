@@ -1,0 +1,21 @@
+* { box-sizing: border-box; }
+body { margin: 0; width: 1280px; height: 800px; overflow: hidden; font-family: "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+  background: radial-gradient(1200px 700px at 75% 20%, #1e3a8a 0%, #0f172a 60%, #0b1020 100%); color: #e5e7eb; }
+.title { position: absolute; left: 56px; top: 40px; }
+.title h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.01em; color: #fff; }
+.title p { margin: 6px 0 0; font-size: 18px; color: #a5b4fc; }
+.term { position: absolute; background: #0d1117; border: 1px solid #263045; border-radius: 12px; box-shadow: 0 20px 60px #0008; overflow: hidden; }
+.term .bar { height: 30px; background: #161b22; display: flex; align-items: center; gap: 7px; padding: 0 12px; font-size: 12px; color: #8b949e; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: #3b4252; }
+.term pre { margin: 0; padding: 14px 16px; font: 12.5px/1.5 "JetBrains Mono", "DejaVu Sans Mono", monospace; color: #c9d1d9; white-space: pre-wrap; }
+.g { color: #3fb950; } .y { color: #d29922; } .r { color: #f85149; } .m { color: #8b949e; } .b { font-weight: 700; color: #e6edf3; } .c { color: #79c0ff; }
+.browser { position: absolute; background: #fff; border-radius: 12px; box-shadow: 0 24px 70px #000a; overflow: hidden; }
+.tabs { height: 40px; background: #dee1e6; display: flex; align-items: flex-end; padding: 0 10px; gap: 6px; }
+.group { margin-bottom: 9px; padding: 2px 10px; border-radius: 6px; background: #1a73e8; color: #fff; font-size: 12px; font-weight: 600; }
+.tab { height: 32px; padding: 0 14px; background: #fff; border-radius: 9px 9px 0 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #202124; border-top: 2px solid #1a73e8; }
+.url { height: 38px; background: #fff; display: flex; align-items: center; padding: 0 12px; gap: 10px; border-bottom: 1px solid #e0e0e0; }
+.url span { flex: 1; background: #f1f3f4; border-radius: 16px; padding: 5px 14px; font-size: 13px; color: #3c4043; }
+.ext { width: 22px; height: 22px; }
+.infobar { background: #f1f3f4; border-bottom: 1px solid #e0e0e0; font-size: 12px; color: #3c4043; padding: 6px 14px; }
+.browser img.page { display: block; }
+.callout { position: absolute; background: #fff; color: #111827; border-radius: 10px; padding: 10px 14px; font-size: 14px; box-shadow: 0 10px 30px #0006; }

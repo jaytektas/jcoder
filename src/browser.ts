@@ -25,6 +25,8 @@ import type { Content } from "./client.js";
 
 /** Where the extension is, to load unpacked. */
 export const EXTENSION_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extension");
+/** The extension in the Chrome Web Store, once it's listed; until then it's loaded unpacked. */
+export const STORE_URL = "";
 /** Ports tried from the one set: the extension looks through the same range, so several jcoders can share one browser. */
 export const PORT_RANGE = 10;
 const PROTOCOL = 1;

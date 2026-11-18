@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body>
+<div class="title"><h1>Reads pages the way a model can use them</h1><p>Every element gets a ref to act on, so models without vision work too. Screenshots for those with it.</p></div>
+<div class="browser" style="left:40px;top:150px;width:600px">
+<div class="tabs"><span class="group">jcoder · greenhouse</span><span class="tab">🌿 Greenhouse · plant schedule</span></div>
+<div class="url"><span>127.0.0.1:47999</span><img class="ext" src="icon.svg"></div>
+<div class="infobar">"jcoder in Chrome" started debugging this browser</div>
+<img class="page" src="greenhouse.jpg" width="600">
+</div>
+<div class="term" style="left:670px;top:150px;width:570px;height:200px">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp; browser read_page &nbsp;<span style="color:#58606b">(after typing the name)</span></div>
+<pre>Viewport 760x440, scrolled to 0 of 440 px.
+- heading "Watering schedule" [e3] h1
+- textbox "Plant name" [e1] value="Fern", required, focused
+- combobox "Water every" [e4] selected="Every day",
+    options: Every day | Every 3 days | Every week
+- button "Add plant" [e2]
+<span class="m">[tab 632527221 · Greenhouse · plant schedule — 127.0.0.1:47999/]</span></pre></div>
+<div class="term" style="left:670px;top:370px;width:570px;height:236px">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp; what it can do</div>
+<pre><span class="c">look</span>     read_page · find · text · screenshot · zoom
+<span class="c">act</span>      click · type · key · scroll · drag · hover
+         set (selects, checkboxes) · upload · dialog
+<span class="c">debug</span>    console · network (with bodies) · js
+<span class="c">tabs</span>     navigate · back · new_tab · close_tab · resize
+
+<span class="m">Works only in its own tab group. Asks once per site
+before acting (in jcoder's edit mode). Talks only to
+your jcoder; nothing is sent anywhere else.</span></pre></div>
+</body></html>

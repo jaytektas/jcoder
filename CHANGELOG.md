@@ -15,7 +15,10 @@
   `/browser on` turns it on (it's off by default: the tool adds about 700
   tokens to the prompt), `/browser` shows the status and how to set up the
   extension. jcoder on another machine: tunnel the port over ssh, or set
-  `browserListen` and `browserToken`.
+  `browserListen` and `browserToken`. Each release attaches the extension
+  as `jcoder-chrome-X.Y.Z.zip`, its version following jcoder's, ready for
+  the Chrome Web Store; `/browser` notes when the extension is older than
+  jcoder.
 
 - **`/goal`: keep working until it's done.** `/goal <condition>` sets a
   goal and starts on it. After each turn the model is asked, without

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "jcoder in Chrome",
-  "version": "0.1.0",
+  "version": "0.6.10",
   "description": "Lets jcoder, the local coding agent, drive this browser: read pages, click, type, take screenshots, read the console and network.",
   "minimum_chrome_version": "120",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms"],

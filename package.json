@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "version": "node scripts/extension-version.mjs && git add extension/manifest.json"
   },
   "license": "GPL-3.0-or-later",
   "devDependencies": {
